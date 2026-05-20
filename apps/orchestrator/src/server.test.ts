@@ -111,6 +111,88 @@ test("GET /nodes/:id returns node snapshot", async (t) => {
   assert.equal(stale.json().active, false);
 });
 
+test("GET /nodes/:id/audit returns node-specific audit history", async (t) => {
+  let now = 25_000;
+  configureStoreRuntime({ nowProvider: () => now });
+  const app = buildApp({ adminApiKey: "node-audit-key", nowProvider: () => now });
+  t.after(() => app.close());
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/nodes/missing/audit",
+    headers: { "x-admin-key": "node-audit-key" }
+  });
+  assert.equal(missing.statusCode, 404);
+
+  await app.inject({
+    method: "POST",
+    url: "/nodes/node-audit/heartbeat",
+    payload: {
+      capabilities: {
+        charging: true,
+        wifi: true,
+        idle: true,
+        userOptIn: true
+      }
+    }
+  });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "node-audit-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "node-audit" },
+      quorum: 1
+    }
+  });
+  const task = created.json();
+
+  now += 1;
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-audit" });
+
+  now += 1;
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-audit",
+      checksum: "node-audit-ok",
+      score: 0.72,
+      payload: {}
+    }
+  });
+
+  const unauthorized = await app.inject({ method: "GET", url: "/nodes/node-audit/audit" });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const all = await app.inject({
+    method: "GET",
+    url: "/nodes/node-audit/audit?limit=10",
+    headers: { "x-admin-key": "node-audit-key" }
+  });
+  assert.equal(all.statusCode, 200);
+  assert.ok(all.json().items.length >= 3);
+  assert.ok(all.json().items.every((item: { nodeId?: string }) => item.nodeId === "node-audit"));
+
+  const heartbeatOnly = await app.inject({
+    method: "GET",
+    url: "/nodes/node-audit/audit?eventType=heartbeat_received&limit=10",
+    headers: { "x-admin-key": "node-audit-key" }
+  });
+  assert.equal(heartbeatOnly.statusCode, 200);
+  assert.equal(heartbeatOnly.json().items.length, 1);
+  assert.equal(heartbeatOnly.json().items[0].eventType, "heartbeat_received");
+
+  const invalidType = await app.inject({
+    method: "GET",
+    url: "/nodes/node-audit/audit?eventType=bad_type",
+    headers: { "x-admin-key": "node-audit-key" }
+  });
+  assert.equal(invalidType.statusCode, 400);
+});
+
 test("task can be created, claimed and completed", async (t) => {
   const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());

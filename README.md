@@ -144,6 +144,7 @@ The orchestrator performs:
 - `POST /tasks/:id/requeue` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /nodes?active=true|false&limit=50`
 - `GET /nodes/:id`
+- `GET /nodes/:id/audit?limit=50&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /nodes/:id/stats`
 - `POST /nodes/:id/heartbeat`
 - `GET /telemetry`
