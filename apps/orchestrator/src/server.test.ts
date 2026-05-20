@@ -239,3 +239,63 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   });
   assert.equal(third.statusCode, 429);
 });
+
+test("admin audit endpoint supports filters and validation", async (t) => {
+  let now = 20_000;
+  const app = buildApp({
+    adminApiKey: "audit-key",
+    adminRateLimitMax: 50,
+    adminRateLimitWindowMs: 60_000,
+    nowProvider: () => now
+  });
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: { kind: "bio_prescreen", payload: { sample: "audit" }, quorum: 1 }
+  });
+  const task = created.json();
+
+  await app.inject({
+    method: "POST",
+    url: "/nodes/node-audit/heartbeat",
+    payload: { capabilities: { charging: true, wifi: true, idle: true, userOptIn: true } }
+  });
+
+  now += 1;
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-audit" });
+
+  now += 1;
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: { nodeId: "node-audit", checksum: "audit-ok", score: 0.66, payload: {} }
+  });
+
+  const byNode = await app.inject({
+    method: "GET",
+    url: "/admin/audit?nodeId=node-audit&limit=20",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(byNode.statusCode, 200);
+  assert.ok(byNode.json().items.length >= 2);
+
+  const byType = await app.inject({
+    method: "GET",
+    url: "/admin/audit?eventType=result_submitted",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(byType.statusCode, 200);
+  assert.ok(byType.json().items.some((item: { eventType: string }) => item.eventType === "result_submitted"));
+
+  const invalidType = await app.inject({
+    method: "GET",
+    url: "/admin/audit?eventType=bad_type",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(invalidType.statusCode, 400);
+
+  const unauthorized = await app.inject({ method: "GET", url: "/admin/audit" });
+  assert.equal(unauthorized.statusCode, 401);
+});

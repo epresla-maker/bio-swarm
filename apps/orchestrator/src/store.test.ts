@@ -4,6 +4,7 @@ import {
   addTask,
   claimTask,
   configureStoreRuntime,
+  getAuditLog,
   getRecentVerdicts,
   getNodeStats,
   getTelemetrySnapshot,
@@ -123,4 +124,36 @@ test("recent verdicts returns newest first and respects limit", () => {
 
   const byTask = getRecentVerdicts({ limit: 10, taskId: task.id });
   assert.equal(byTask.length, 2);
+});
+
+test("audit log supports filtering by node, event type and time range", () => {
+  let now = 40_000;
+  resetStoreForTests();
+  configureStoreRuntime({ nowProvider: () => now, leaseTtlMs: 100, maxAttempts: 3 });
+
+  const task = addTask({ kind: "molecule_score", payload: { smiles: "CO" }, quorum: 1 });
+  recordHeartbeat("node-a", { charging: true, wifi: true, idle: true, userOptIn: true });
+
+  now += 1;
+  claimTask("node-a");
+
+  now += 1;
+  submitResult({
+    taskId: task.id,
+    nodeId: "node-a",
+    checksum: "audit-1",
+    score: 0.9,
+    payload: {},
+    submittedAt: new Date(now).toISOString()
+  });
+
+  const byNode = getAuditLog({ limit: 20, nodeId: "node-a" });
+  assert.ok(byNode.length >= 3);
+
+  const claimsOnly = getAuditLog({ limit: 20, eventType: "task_claimed" });
+  assert.equal(claimsOnly.length, 1);
+  assert.equal(claimsOnly[0].taskId, task.id);
+
+  const range = getAuditLog({ limit: 20, since: now - 1, until: now });
+  assert.ok(range.some((item) => item.eventType === "result_submitted"));
 });

@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
-import { addTask, claimTask, getNodeStats, getRecentVerdicts, getTelemetrySnapshot, recordHeartbeat, submitResult } from "./store.js";
+import { addTask, claimTask, getAuditLog, getNodeStats, getRecentVerdicts, getTelemetrySnapshot, recordHeartbeat, submitResult } from "./store.js";
 
 interface AdminRateState {
   windowStartMs: number;
@@ -21,6 +21,37 @@ export function buildApp(options?: {
     options?.adminRateLimitWindowMs ?? Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS ?? 60_000);
   const nowProvider = options?.nowProvider ?? (() => Date.now());
   const adminRateMap = new Map<string, AdminRateState>();
+
+  function enforceAdminAccess(request: { headers: Record<string, string | string[] | undefined>; ip: string }, reply: { status: (code: number) => { send: (payload: Record<string, string>) => unknown } }): boolean {
+    if (!adminApiKey) {
+      reply.status(503).send({ error: "admin_api_key_not_configured" });
+      return false;
+    }
+
+    const providedKey = request.headers["x-admin-key"];
+    if (providedKey !== adminApiKey) {
+      reply.status(401).send({ error: "unauthorized" });
+      return false;
+    }
+
+    const forwarded = request.headers["x-forwarded-for"];
+    const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const clientIp = forwardedValue ?? request.ip;
+    const now = nowProvider();
+    const existing = adminRateMap.get(clientIp);
+    if (!existing || now - existing.windowStartMs >= adminRateLimitWindowMs) {
+      adminRateMap.set(clientIp, { windowStartMs: now, count: 1 });
+      return true;
+    }
+
+    if (existing.count >= adminRateLimitMax) {
+      reply.status(429).send({ error: "admin_rate_limited" });
+      return false;
+    }
+
+    existing.count += 1;
+    return true;
+  }
 
   app.get("/health", async () => {
     return { ok: true };
@@ -107,26 +138,8 @@ export function buildApp(options?: {
   });
 
   app.get<{ Querystring: { limit?: string; taskId?: string; accepted?: string } }>("/admin/verdicts", async (request, reply) => {
-    if (!adminApiKey) {
-      return reply.status(503).send({ error: "admin_api_key_not_configured" });
-    }
-
-    const providedKey = request.headers["x-admin-key"];
-    if (providedKey !== adminApiKey) {
-      return reply.status(401).send({ error: "unauthorized" });
-    }
-
-    const forwarded = request.headers["x-forwarded-for"];
-    const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const clientIp = forwardedValue ?? request.ip;
-    const now = nowProvider();
-    const existing = adminRateMap.get(clientIp);
-    if (!existing || now - existing.windowStartMs >= adminRateLimitWindowMs) {
-      adminRateMap.set(clientIp, { windowStartMs: now, count: 1 });
-    } else if (existing.count >= adminRateLimitMax) {
-      return reply.status(429).send({ error: "admin_rate_limited" });
-    } else {
-      existing.count += 1;
+    if (!enforceAdminAccess(request, reply)) {
+      return;
     }
 
     const rawLimit = request.query.limit;
@@ -157,6 +170,63 @@ export function buildApp(options?: {
       })
     };
   });
+
+  app.get<{ Querystring: { limit?: string; nodeId?: string; taskId?: string; eventType?: string; since?: string; until?: string } }>(
+    "/admin/audit",
+    async (request, reply) => {
+      if (!enforceAdminAccess(request, reply)) {
+        return;
+      }
+
+      const rawLimit = request.query.limit;
+      const parsedLimit = rawLimit ? Number(rawLimit) : 50;
+      if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+        return reply.status(400).send({ error: "invalid_limit" });
+      }
+
+      const eventType = request.query.eventType;
+      const allowedEventTypes = new Set([
+        "task_created",
+        "task_claimed",
+        "result_submitted",
+        "result_rejected",
+        "heartbeat_received",
+        "lease_expired"
+      ]);
+      if (eventType && !allowedEventTypes.has(eventType)) {
+        return reply.status(400).send({ error: "invalid_event_type" });
+      }
+
+      const since = request.query.since ? Date.parse(request.query.since) : undefined;
+      const until = request.query.until ? Date.parse(request.query.until) : undefined;
+
+      if (typeof since === "number" && Number.isNaN(since)) {
+        return reply.status(400).send({ error: "invalid_since" });
+      }
+
+      if (typeof until === "number" && Number.isNaN(until)) {
+        return reply.status(400).send({ error: "invalid_until" });
+      }
+
+      return {
+        items: getAuditLog({
+          limit: parsedLimit,
+          nodeId: request.query.nodeId,
+          taskId: request.query.taskId,
+          eventType: eventType as
+            | "task_created"
+            | "task_claimed"
+            | "result_submitted"
+            | "result_rejected"
+            | "heartbeat_received"
+            | "lease_expired"
+            | undefined,
+          since,
+          until
+        })
+      };
+    }
+  );
 
   return app;
 }

@@ -120,17 +120,31 @@ The orchestrator performs:
 - `GET /nodes/:id/stats`
 - `POST /nodes/:id/heartbeat`
 - `GET /telemetry`
-- `GET /admin/verdicts?limit=20&accepted=true&taskId=...`
+- `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 
 ## Runtime Env Vars
 
 Orchestrator:
+- `PORT` (default `4000`)
+- `LEASE_TTL_MS` (default `30000`)
+- `MAX_TASK_ATTEMPTS` (default `4`)
+- `ADMIN_API_KEY` (required for `/admin/*` endpoints)
 - `ADMIN_RATE_LIMIT_MAX` (default `60` requests/window per IP)
 - `ADMIN_RATE_LIMIT_WINDOW_MS` (default `60000`)
 
 Edge runtime:
+- `ORCHESTRATOR_URL` (default `http://localhost:4000`)
+- `NODE_ID` (default random `node-xxxxxxxx`)
 
 ## Next Milestones
+
+- Background task execution for iOS with real power/network constraints.
+- Signed work units and verifiable compute proofs.
+- Redis backed queue and persistent telemetry.
+- Federated training experiments for biomedical embeddings.
+
+## CI and Release Automation
 
 - CI workflow: `.github/workflows/ci.yml`
    - Runs on push and pull request.

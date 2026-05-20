@@ -25,6 +25,31 @@ export interface VerdictQuery {
   accepted?: boolean;
 }
 
+export type AuditEventType =
+  | "task_created"
+  | "task_claimed"
+  | "result_submitted"
+  | "result_rejected"
+  | "heartbeat_received"
+  | "lease_expired";
+
+export interface AuditLogEntry {
+  at: string;
+  eventType: AuditEventType;
+  taskId?: string;
+  nodeId?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface AuditQuery {
+  limit: number;
+  nodeId?: string;
+  taskId?: string;
+  eventType?: AuditEventType;
+  since?: number;
+  until?: number;
+}
+
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
@@ -37,6 +62,8 @@ let retryCount = 0;
 let expiredLeaseCount = 0;
 const taskVerdicts: TaskVerdictLogEntry[] = [];
 const MAX_VERDICT_LOG = 200;
+const auditLog: AuditLogEntry[] = [];
+const MAX_AUDIT_LOG = 500;
 
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
@@ -63,6 +90,7 @@ export function resetStoreForTests(): void {
   retryCount = 0;
   expiredLeaseCount = 0;
   taskVerdicts.length = 0;
+  auditLog.length = 0;
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   nowProvider = () => Date.now();
@@ -85,6 +113,12 @@ export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
     leaseOwner: null,
     leaseExpiresAt: null,
     attempts: 0
+  });
+
+  pushAuditEvent({
+    eventType: "task_created",
+    taskId: task.id,
+    details: { kind: task.kind, quorum: task.quorum }
   });
 
   return task;
@@ -122,6 +156,12 @@ export function claimTask(nodeId: string): SwarmTask | null {
     record.leaseOwner = nodeId;
     record.leaseExpiresAt = nowProvider() + leaseTtlMs;
     touchNode(nodeId);
+    pushAuditEvent({
+      eventType: "task_claimed",
+      taskId: record.task.id,
+      nodeId,
+      details: { attempts: record.attempts }
+    });
     return record.task;
   }
 
@@ -135,18 +175,36 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
   if (!record) {
     incrementNode(result.nodeId, false);
     pushVerdict(result.taskId, result.nodeId, false, "task_not_found");
+    pushAuditEvent({
+      eventType: "result_rejected",
+      taskId: result.taskId,
+      nodeId: result.nodeId,
+      details: { reason: "task_not_found" }
+    });
     return { accepted: false, reason: "task_not_found" };
   }
 
   if (record.completed || record.failed) {
     incrementNode(result.nodeId, false);
     pushVerdict(result.taskId, result.nodeId, false, "task_already_completed");
+    pushAuditEvent({
+      eventType: "result_rejected",
+      taskId: result.taskId,
+      nodeId: result.nodeId,
+      details: { reason: "task_already_completed" }
+    });
     return { accepted: false, reason: "task_already_completed" };
   }
 
   if (record.leaseOwner !== result.nodeId) {
     incrementNode(result.nodeId, false);
     pushVerdict(result.taskId, result.nodeId, false, "node_does_not_hold_lease");
+    pushAuditEvent({
+      eventType: "result_rejected",
+      taskId: result.taskId,
+      nodeId: result.nodeId,
+      details: { reason: "node_does_not_hold_lease" }
+    });
     return { accepted: false, reason: "node_does_not_hold_lease" };
   }
 
@@ -154,6 +212,12 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
     clearLease(record);
     incrementNode(result.nodeId, false);
     pushVerdict(result.taskId, result.nodeId, false, "lease_expired");
+    pushAuditEvent({
+      eventType: "result_rejected",
+      taskId: result.taskId,
+      nodeId: result.nodeId,
+      details: { reason: "lease_expired" }
+    });
     return { accepted: false, reason: "lease_expired" };
   }
 
@@ -161,6 +225,12 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
   if (duplicate) {
     incrementNode(result.nodeId, false);
     pushVerdict(result.taskId, result.nodeId, false, "duplicate_node_submission");
+    pushAuditEvent({
+      eventType: "result_rejected",
+      taskId: result.taskId,
+      nodeId: result.nodeId,
+      details: { reason: "duplicate_node_submission" }
+    });
     return { accepted: false, reason: "duplicate_node_submission" };
   }
 
@@ -174,6 +244,12 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
   }
 
   pushVerdict(result.taskId, result.nodeId, true, null);
+  pushAuditEvent({
+    eventType: "result_submitted",
+    taskId: result.taskId,
+    nodeId: result.nodeId,
+    details: { score: result.score }
+  });
 
   return { accepted: true };
 }
@@ -195,6 +271,36 @@ export function getRecentVerdicts(query: VerdictQuery): TaskVerdictLogEntry[] {
   return filtered.slice(-bounded).reverse();
 }
 
+export function getAuditLog(query: AuditQuery): AuditLogEntry[] {
+  const bounded = Math.max(1, Math.min(200, Math.floor(query.limit)));
+  const filtered = auditLog.filter((item) => {
+    if (query.nodeId && item.nodeId !== query.nodeId) {
+      return false;
+    }
+
+    if (query.taskId && item.taskId !== query.taskId) {
+      return false;
+    }
+
+    if (query.eventType && item.eventType !== query.eventType) {
+      return false;
+    }
+
+    const time = new Date(item.at).getTime();
+    if (typeof query.since === "number" && time < query.since) {
+      return false;
+    }
+
+    if (typeof query.until === "number" && time > query.until) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return filtered.slice(-bounded).reverse();
+}
+
 export function recordHeartbeat(nodeId: string, capabilities?: NodeCapabilities): NodeStats {
   if (capabilities) {
     nodeCapabilities.set(nodeId, capabilities);
@@ -203,6 +309,11 @@ export function recordHeartbeat(nodeId: string, capabilities?: NodeCapabilities)
   const stats = getNodeStats(nodeId);
   stats.heartbeats += 1;
   stats.lastSeenAt = new Date(nowProvider()).toISOString();
+  pushAuditEvent({
+    eventType: "heartbeat_received",
+    nodeId,
+    details: capabilities ? { capabilities } : undefined
+  });
   return stats;
 }
 
@@ -293,6 +404,12 @@ function sweepExpiredLeases(): void {
     }
 
     expiredLeaseCount += 1;
+    pushAuditEvent({
+      eventType: "lease_expired",
+      taskId: record.task.id,
+      nodeId: record.leaseOwner,
+      details: { attempts: record.attempts }
+    });
     clearLease(record);
 
     if (record.attempts >= maxAttempts && record.results.length < record.task.quorum) {
@@ -322,5 +439,16 @@ function pushVerdict(taskId: string, nodeId: string, accepted: boolean, reason: 
 
   if (taskVerdicts.length > MAX_VERDICT_LOG) {
     taskVerdicts.splice(0, taskVerdicts.length - MAX_VERDICT_LOG);
+  }
+}
+
+function pushAuditEvent(event: Omit<AuditLogEntry, "at">): void {
+  auditLog.push({
+    ...event,
+    at: new Date(nowProvider()).toISOString()
+  });
+
+  if (auditLog.length > MAX_AUDIT_LOG) {
+    auditLog.splice(0, auditLog.length - MAX_AUDIT_LOG);
   }
 }
