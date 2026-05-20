@@ -1455,6 +1455,7 @@ test("admin dashboard ui endpoint serves html shell", async (t) => {
   assert.match(response.body, /Bio Swarm Operator Console/);
   assert.match(response.body, /\/admin\/dashboard/);
   assert.match(response.body, /id="language"/);
+  assert.match(response.body, /id="gpuNodes"/);
   assert.match(response.body, />EN<\/option>/);
   assert.match(response.body, /bioSwarmLanguage/);
 });

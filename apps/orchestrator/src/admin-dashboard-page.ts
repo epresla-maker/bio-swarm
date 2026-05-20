@@ -282,6 +282,11 @@ export function renderAdminDashboardPage(): string {
 					<div id="nodeSummary"></div>
 				</article>
 
+				<article class="card wide">
+					<h3 id="gpuNodesTitle">Desktop GPU Node-ok</h3>
+					<div id="gpuNodes"></div>
+				</article>
+
 				<article class="card half">
 					<h3 id="attentionTasksTitle">Figyelmet Igenylo Feladatok</h3>
 					<div id="attentionTasks"></div>
@@ -364,6 +369,7 @@ export function renderAdminDashboardPage(): string {
 					researchDetailsTitle: 'Kiserlet Reszletek',
 					researchTrendTitle: 'Kutatasi Trend (Legjobb Pontszam)',
 					compareTitle: 'Kiserlet Osszehasonlitas (A/B)',
+					gpuNodesTitle: 'Desktop GPU Node-ok',
 					expNamePlaceholder: 'Kiserlet neve',
 					expModelPlaceholder: 'Modell verzio',
 					expPromptPlaceholder: 'Kutatasi prompt',
@@ -382,10 +388,13 @@ export function renderAdminDashboardPage(): string {
 					enabled: 'Engedelyezett',
 					disabled: 'Tiltott',
 					quarantine: 'Karanten',
+					inactive: 'Inaktiv',
 					noAttentionTasks: 'Nincs figyelmet igenylo feladat.',
 					noAttentionNodes: 'Nincs figyelmet igenylo node.',
 					noAudit: 'Nincs audit esemeny.',
 					noExperiments: 'Meg nincs kiserlet.',
+					noGpuNodes: 'Nincs aktiv desktop GPU node.',
+					gpuVram: 'VRAM',
 					open: 'Megnyitas',
 					noExperimentOption: 'Nincs kiserlet',
 					runCompareFirst: 'Elobb futtasd az osszehasonlitast.',
@@ -427,6 +436,7 @@ export function renderAdminDashboardPage(): string {
 					researchDetailsTitle: 'Experiment Details',
 					researchTrendTitle: 'Research Trend (Best Score)',
 					compareTitle: 'Experiment Comparison (A/B)',
+					gpuNodesTitle: 'Desktop GPU Nodes',
 					expNamePlaceholder: 'Experiment name',
 					expModelPlaceholder: 'Model version',
 					expPromptPlaceholder: 'Research prompt',
@@ -445,10 +455,13 @@ export function renderAdminDashboardPage(): string {
 					enabled: 'Enabled',
 					disabled: 'Disabled',
 					quarantine: 'Quarantined',
+					inactive: 'Inactive',
 					noAttentionTasks: 'No attention tasks.',
 					noAttentionNodes: 'No attention nodes.',
 					noAudit: 'No audit events.',
 					noExperiments: 'No experiments yet.',
+					noGpuNodes: 'No desktop GPU nodes found.',
+					gpuVram: 'VRAM',
 					open: 'Open',
 					noExperimentOption: 'No experiments',
 					runCompareFirst: 'Run comparison first.',
@@ -495,6 +508,7 @@ export function renderAdminDashboardPage(): string {
 				nodeSummaryTitle: document.getElementById('nodeSummaryTitle'),
 				attentionTasksTitle: document.getElementById('attentionTasksTitle'),
 				attentionNodesTitle: document.getElementById('attentionNodesTitle'),
+				gpuNodesTitle: document.getElementById('gpuNodesTitle'),
 				recentAuditTitle: document.getElementById('recentAuditTitle'),
 				researchTitle: document.getElementById('researchTitle'),
 				researchQueueTitle: document.getElementById('researchQueueTitle'),
@@ -505,6 +519,7 @@ export function renderAdminDashboardPage(): string {
 				nodeSummary: document.getElementById("nodeSummary"),
 				attentionTasks: document.getElementById("attentionTasks"),
 				attentionNodes: document.getElementById("attentionNodes"),
+				gpuNodes: document.getElementById("gpuNodes"),
 				recentAudit: document.getElementById("recentAudit"),
 				expName: document.getElementById("expName"),
 				expModel: document.getElementById("expModel"),
@@ -537,6 +552,7 @@ export function renderAdminDashboardPage(): string {
 				els.nodeSummaryTitle.textContent = t('nodeSummaryTitle');
 				els.attentionTasksTitle.textContent = t('attentionTasksTitle');
 				els.attentionNodesTitle.textContent = t('attentionNodesTitle');
+				els.gpuNodesTitle.textContent = t('gpuNodesTitle');
 				els.recentAuditTitle.textContent = t('recentAuditTitle');
 				els.researchTitle.textContent = t('researchTitle');
 				els.researchQueueTitle.textContent = t('researchQueueTitle');
@@ -555,6 +571,11 @@ export function renderAdminDashboardPage(): string {
 				if (!researchItems.length) {
 					els.researchTrend.innerHTML = t('researchTrendEmpty');
 				}
+				if (gpuNodeItems.length) {
+					renderGpuNodes(gpuNodeItems);
+				} else {
+					els.gpuNodes.innerHTML = '<div class="mono">' + t('noGpuNodes') + '</div>';
+				}
 				if (!compareSnapshot) {
 					els.compareResult.innerHTML = t('compareHint');
 				}
@@ -563,6 +584,7 @@ export function renderAdminDashboardPage(): string {
 			let autoRefreshTimer = null;
 			let selectedExperimentId = null;
 			let researchItems = [];
+			let gpuNodeItems = [];
 			let compareAId = null;
 			let compareBId = null;
 			let compareSnapshot = null;
@@ -633,6 +655,39 @@ export function renderAdminDashboardPage(): string {
 							)
 							.join("")
 					: '<div class="mono">' + t('noAudit') + '</div>';
+			}
+
+			function renderGpuNodes(items) {
+				if (!items.length) {
+					els.gpuNodes.innerHTML = '<div class="mono">' + t('noGpuNodes') + '</div>';
+					return;
+				}
+
+				els.gpuNodes.innerHTML = items
+					.map((item) => {
+						const caps = item.capabilities || {};
+						const gpu = caps.gpu || {};
+						const mode = item.active ? t('active') : t('inactive');
+						const badge = item.active ? 'ok' : 'warn';
+						return (
+							'<div class="row"><div><strong>' +
+							item.stats.nodeId +
+							'</strong><div class="mono">' +
+							(gpu.vendor || 'unknown') +
+							' ' +
+							(gpu.model || 'gpu') +
+							' | ' +
+							t('gpuVram') +
+							'=' +
+							(gpu.vramGb ?? 'n/a') +
+							' GB</div></div><span class="badge ' +
+							badge +
+							'">' +
+							mode +
+							'</span></div>'
+						);
+					})
+					.join('');
 			}
 
 			function toNumber(value, fallback) {
@@ -968,6 +1023,24 @@ export function renderAdminDashboardPage(): string {
 				renderCompareSelectors(researchItems);
 			}
 
+			async function loadGpuNodes() {
+				try {
+					const response = await fetch('/nodes?limit=100');
+					if (!response.ok) {
+						return;
+					}
+
+					const data = await response.json();
+					const items = Array.isArray(data.items) ? data.items : [];
+					gpuNodeItems = items.filter(
+						(item) => item && item.capabilities && item.capabilities.nodeClass === 'desktop_gpu' && item.capabilities.gpu
+					);
+					renderGpuNodes(gpuNodeItems);
+				} catch (_error) {
+					// Keep dashboard usable even if optional GPU list fetch fails.
+				}
+			}
+
 			async function loadExperimentDetails() {
 				const key = els.key.value.trim();
 				if (!key || !selectedExperimentId) {
@@ -1030,6 +1103,7 @@ export function renderAdminDashboardPage(): string {
 
 			async function loadAll() {
 				await loadDashboard();
+				await loadGpuNodes();
 				await loadResearchList();
 				if (selectedExperimentId) {
 					await loadExperimentDetails();
