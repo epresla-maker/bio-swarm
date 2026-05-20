@@ -2,8 +2,9 @@ import Fastify from "fastify";
 import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
 import { addTask, claimTask, getNodeStats, getRecentVerdicts, getTelemetrySnapshot, recordHeartbeat, submitResult } from "./store.js";
 
-export function buildApp(options?: { logger?: boolean }) {
+export function buildApp(options?: { logger?: boolean; adminApiKey?: string }) {
   const app = Fastify({ logger: options?.logger ?? false });
+  const adminApiKey = options?.adminApiKey ?? process.env.ADMIN_API_KEY ?? "";
 
   app.get("/health", async () => {
     return { ok: true };
@@ -90,6 +91,15 @@ export function buildApp(options?: { logger?: boolean }) {
   });
 
   app.get<{ Querystring: { limit?: string; taskId?: string; accepted?: string } }>("/admin/verdicts", async (request, reply) => {
+    if (!adminApiKey) {
+      return reply.status(503).send({ error: "admin_api_key_not_configured" });
+    }
+
+    const providedKey = request.headers["x-admin-key"];
+    if (providedKey !== adminApiKey) {
+      return reply.status(401).send({ error: "unauthorized" });
+    }
+
     const rawLimit = request.query.limit;
     const rawTaskId = request.query.taskId;
     const rawAccepted = request.query.accepted;

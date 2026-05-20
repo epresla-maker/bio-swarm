@@ -121,7 +121,7 @@ test("expired lease allows another node to claim same task", async (t) => {
 });
 
 test("admin verdicts endpoint returns recent verdict entries", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "test-admin-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
@@ -161,22 +161,41 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   });
   assert.equal(rejected.statusCode, 409);
 
-  const verdicts = await app.inject({ method: "GET", url: "/admin/verdicts?limit=2" });
+  const verdicts = await app.inject({
+    method: "GET",
+    url: "/admin/verdicts?limit=2",
+    headers: { "x-admin-key": "test-admin-key" }
+  });
   assert.equal(verdicts.statusCode, 200);
   const items = verdicts.json().items;
   assert.equal(items.length, 2);
   assert.equal(items[0].accepted, false);
   assert.equal(items[1].accepted, true);
 
-  const acceptedOnly = await app.inject({ method: "GET", url: "/admin/verdicts?accepted=true&limit=10" });
+  const acceptedOnly = await app.inject({
+    method: "GET",
+    url: "/admin/verdicts?accepted=true&limit=10",
+    headers: { "x-admin-key": "test-admin-key" }
+  });
   assert.equal(acceptedOnly.statusCode, 200);
   assert.equal(acceptedOnly.json().items.length, 1);
   assert.equal(acceptedOnly.json().items[0].accepted, true);
 
-  const byTask = await app.inject({ method: "GET", url: `/admin/verdicts?taskId=${task.id}&limit=10` });
+  const byTask = await app.inject({
+    method: "GET",
+    url: `/admin/verdicts?taskId=${task.id}&limit=10`,
+    headers: { "x-admin-key": "test-admin-key" }
+  });
   assert.equal(byTask.statusCode, 200);
   assert.equal(byTask.json().items.length, 2);
 
-  const invalidAccepted = await app.inject({ method: "GET", url: "/admin/verdicts?accepted=maybe" });
+  const invalidAccepted = await app.inject({
+    method: "GET",
+    url: "/admin/verdicts?accepted=maybe",
+    headers: { "x-admin-key": "test-admin-key" }
+  });
   assert.equal(invalidAccepted.statusCode, 400);
+
+  const unauthorized = await app.inject({ method: "GET", url: "/admin/verdicts?limit=2" });
+  assert.equal(unauthorized.statusCode, 401);
 });

@@ -125,22 +125,11 @@ The orchestrator performs:
 ## Runtime Env Vars
 
 Orchestrator:
-- `PORT` (default `4000`)
-- `LEASE_TTL_MS` (default `30000`)
-- `MAX_TASK_ATTEMPTS` (default `4`)
+- `ADMIN_API_KEY` (required for `/admin/*` endpoints)
 
 Edge runtime:
-- `ORCHESTRATOR_URL` (default `http://localhost:4000`)
-- `NODE_ID` (default random `node-xxxxxxxx`)
 
 ## Next Milestones
-
-- Background task execution for iOS with real power/network constraints.
-- Signed work units and verifiable compute proofs.
-- Redis backed queue and persistent telemetry.
-- Federated training experiments for biomedical embeddings.
-
-## CI and Release Automation
 
 - CI workflow: `.github/workflows/ci.yml`
    - Runs on push and pull request.
