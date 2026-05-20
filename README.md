@@ -130,6 +130,8 @@ The orchestrator performs:
    pnpm smoke:e2e
    ```
 
+   This live check also verifies task and node observability endpoints, including admin-protected audit routes.
+
 ## API Endpoints (MVP)
 
 - `POST /tasks` (requires header `x-admin-key: <ADMIN_API_KEY>`)

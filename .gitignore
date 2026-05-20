@@ -6,4 +6,5 @@ dist
 .expo
 coverage
 scripts/.smoke-*.log
+scripts/.smoke-audit*.jsonl
 apps/orchestrator/data/
