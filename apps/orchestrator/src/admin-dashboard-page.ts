@@ -256,11 +256,15 @@ export function renderAdminDashboardPage(): string {
 			<section class="hero">
 				<div>
 					<h1 class="title">Bio Swarm Operator Console</h1>
-					<p class="subtitle">Elo figyelmi nezet a /admin/dashboard vegpontrol</p>
+					<p id="subtitle" class="subtitle">Elo figyelmi nezet a /admin/dashboard vegpontrol</p>
 				</div>
 				<div class="controls">
+					<select id="language" class="input" style="min-width: 100px">
+						<option value="hu">HU</option>
+						<option value="en">EN</option>
+					</select>
 					<input id="key" class="input" type="password" placeholder="Admin API kulcs" />
-					<label class="toggle"><input id="autoRefresh" type="checkbox" checked /> Auto 5 mp</label>
+					<label id="autoRefreshLabel" class="toggle"><input id="autoRefresh" type="checkbox" checked /> Auto 5 mp</label>
 					<button id="refresh" class="button" type="button">Frissites</button>
 				</div>
 			</section>
@@ -269,32 +273,32 @@ export function renderAdminDashboardPage(): string {
 
 			<section class="grid">
 				<article class="card kpi">
-					<h2>Feladat Osszegzes</h2>
+					<h2 id="taskSummaryTitle">Feladat Osszegzes</h2>
 					<div id="taskSummary"></div>
 				</article>
 
 				<article class="card kpi">
-					<h2>Node Osszegzes</h2>
+					<h2 id="nodeSummaryTitle">Node Osszegzes</h2>
 					<div id="nodeSummary"></div>
 				</article>
 
 				<article class="card half">
-					<h3>Figyelmet Igenylo Feladatok</h3>
+					<h3 id="attentionTasksTitle">Figyelmet Igenylo Feladatok</h3>
 					<div id="attentionTasks"></div>
 				</article>
 
 				<article class="card half">
-					<h3>Figyelmet Igenylo Node-ok</h3>
+					<h3 id="attentionNodesTitle">Figyelmet Igenylo Node-ok</h3>
 					<div id="attentionNodes"></div>
 				</article>
 
 				<article class="card wide">
-					<h3>Legutobbi Audit Esemenyek</h3>
+					<h3 id="recentAuditTitle">Legutobbi Audit Esemenyek</h3>
 					<div id="recentAudit"></div>
 				</article>
 
 				<article class="card wide">
-					<h3>Kutatasi Kiserletek</h3>
+					<h3 id="researchTitle">Kutatasi Kiserletek</h3>
 					<div class="form-grid">
 						<input id="expName" class="input" placeholder="Kiserlet neve" value="Mutacios Sepres" />
 						<input id="expModel" class="input" placeholder="Modell verzio" value="bio-llm-v1" />
@@ -313,22 +317,22 @@ export function renderAdminDashboardPage(): string {
 				</article>
 
 				<article class="card half">
-					<h3>Kiserlet Sor</h3>
+					<h3 id="researchQueueTitle">Kiserlet Sor</h3>
 					<div id="researchList"></div>
 				</article>
 
 				<article class="card half">
-					<h3>Kiserlet Reszletek</h3>
+					<h3 id="researchDetailsTitle">Kiserlet Reszletek</h3>
 					<div id="researchDetails" class="mono">Valassz egy kiserletet a reszletekhez.</div>
 				</article>
 
 				<article class="card wide">
-					<h3>Kutatasi Trend (Legjobb Pontszam)</h3>
+					<h3 id="researchTrendTitle">Kutatasi Trend (Legjobb Pontszam)</h3>
 					<div id="researchTrend" class="trend-wrap mono">Meg nincs befejezett kiserlet.</div>
 				</article>
 
 				<article class="card wide">
-					<h3>Kiserlet Osszehasonlitas (A/B)</h3>
+					<h3 id="compareTitle">Kiserlet Osszehasonlitas (A/B)</h3>
 					<div class="compare-grid">
 						<select id="compareA" class="input"></select>
 						<select id="compareB" class="input"></select>
@@ -344,11 +348,143 @@ export function renderAdminDashboardPage(): string {
 		</main>
 
 		<script>
+			const I18N = {
+				hu: {
+					subtitle: 'Elo figyelmi nezet a /admin/dashboard vegpontrol',
+					keyPlaceholder: 'Admin API kulcs',
+					auto5s: 'Auto 5 mp',
+					refresh: 'Frissites',
+					taskSummaryTitle: 'Feladat Osszegzes',
+					nodeSummaryTitle: 'Node Osszegzes',
+					attentionTasksTitle: 'Figyelmet Igenylo Feladatok',
+					attentionNodesTitle: 'Figyelmet Igenylo Node-ok',
+					recentAuditTitle: 'Legutobbi Audit Esemenyek',
+					researchTitle: 'Kutatasi Kiserletek',
+					researchQueueTitle: 'Kiserlet Sor',
+					researchDetailsTitle: 'Kiserlet Reszletek',
+					researchTrendTitle: 'Kutatasi Trend (Legjobb Pontszam)',
+					compareTitle: 'Kiserlet Osszehasonlitas (A/B)',
+					expNamePlaceholder: 'Kiserlet neve',
+					expModelPlaceholder: 'Modell verzio',
+					expPromptPlaceholder: 'Kutatasi prompt',
+					createExperiment: 'Kiserlet Letrehozasa',
+					refreshResearch: 'Kutatas Frissitese',
+					runCompare: 'Osszehasonlitas',
+					compareHint: 'Valassz ket kiserletet, majd kattints az Osszehasonlitas gombra.',
+					researchDetailsHint: 'Valassz egy kiserletet a reszletekhez.',
+					researchTrendEmpty: 'Meg nincs befejezett kiserlet.',
+					total: 'Osszes',
+					pending: 'Fuggo',
+					leased: 'Berletben',
+					completed: 'Befejezett',
+					failed: 'Sikertelen',
+					active: 'Aktiv',
+					enabled: 'Engedelyezett',
+					disabled: 'Tiltott',
+					quarantine: 'Karanten',
+					noAttentionTasks: 'Nincs figyelmet igenylo feladat.',
+					noAttentionNodes: 'Nincs figyelmet igenylo node.',
+					noAudit: 'Nincs audit esemeny.',
+					noExperiments: 'Meg nincs kiserlet.',
+					open: 'Megnyitas',
+					noExperimentOption: 'Nincs kiserlet',
+					runCompareFirst: 'Elobb futtasd az osszehasonlitast.',
+					jsonExportDone: 'JSON export kesz.',
+					csvExportDone: 'CSV export kesz.',
+					pickTwoExperiments: 'Elobb valassz ket kiserletet.',
+					compareLoadFailed: 'Az osszehasonlitas lekerese sikertelen.',
+					experimentLoadFailed: 'Kiserlet betoltes sikertelen: ',
+					researchListLoadFailed: 'Kutatasi lista lekerese sikertelen: ',
+					enterAdminKey: 'Elobb add meg az admin API kulcsot.',
+					creatingExperiment: 'Kiserlet letrehozasa...',
+					createFailed: 'Letrehozas sikertelen: ',
+					experimentCreated: 'Kiserlet letrehozva: ',
+					loadingDashboard: 'Vezerlopult betoltese...',
+					dashboardLoadFailed: 'Vezerlopult lekeres sikertelen: ',
+					updatedAt: 'Frissitve: ',
+					requestFailed: 'Keres sikertelen: '
+				},
+				en: {
+					subtitle: 'Live attention view from the /admin/dashboard endpoint',
+					keyPlaceholder: 'Admin API key',
+					auto5s: 'Auto 5s',
+					refresh: 'Refresh',
+					taskSummaryTitle: 'Task Summary',
+					nodeSummaryTitle: 'Node Summary',
+					attentionTasksTitle: 'Attention Tasks',
+					attentionNodesTitle: 'Attention Nodes',
+					recentAuditTitle: 'Recent Audit Events',
+					researchTitle: 'Research Experiments',
+					researchQueueTitle: 'Experiment Queue',
+					researchDetailsTitle: 'Experiment Details',
+					researchTrendTitle: 'Research Trend (Best Score)',
+					compareTitle: 'Experiment Comparison (A/B)',
+					expNamePlaceholder: 'Experiment name',
+					expModelPlaceholder: 'Model version',
+					expPromptPlaceholder: 'Research prompt',
+					createExperiment: 'Create Experiment',
+					refreshResearch: 'Refresh Research',
+					runCompare: 'Compare',
+					compareHint: 'Select two experiments, then click Compare.',
+					researchDetailsHint: 'Select an experiment to inspect details.',
+					researchTrendEmpty: 'No completed experiments yet.',
+					total: 'Total',
+					pending: 'Pending',
+					leased: 'Leased',
+					completed: 'Completed',
+					failed: 'Failed',
+					active: 'Active',
+					enabled: 'Enabled',
+					disabled: 'Disabled',
+					quarantine: 'Quarantined',
+					noAttentionTasks: 'No attention tasks.',
+					noAttentionNodes: 'No attention nodes.',
+					noAudit: 'No audit events.',
+					noExperiments: 'No experiments yet.',
+					open: 'Open',
+					noExperimentOption: 'No experiments',
+					runCompareFirst: 'Run comparison first.',
+					jsonExportDone: 'JSON export done.',
+					csvExportDone: 'CSV export done.',
+					pickTwoExperiments: 'Pick two experiments first.',
+					compareLoadFailed: 'Failed to load comparison.',
+					experimentLoadFailed: 'Failed to load experiment: ',
+					researchListLoadFailed: 'Failed to load research list: ',
+					enterAdminKey: 'Enter admin API key first.',
+					creatingExperiment: 'Creating experiment...',
+					createFailed: 'Create failed: ',
+					experimentCreated: 'Experiment created: ',
+					loadingDashboard: 'Loading dashboard...',
+					dashboardLoadFailed: 'Dashboard request failed: ',
+					updatedAt: 'Updated: ',
+					requestFailed: 'Request failed: '
+				}
+			};
+
+			let language = localStorage.getItem('bioSwarmLanguage') === 'en' ? 'en' : 'hu';
+
+			function t(key) {
+				return (I18N[language] && I18N[language][key]) || (I18N.hu && I18N.hu[key]) || key;
+			}
+
 			const els = {
+				language: document.getElementById('language'),
+				subtitle: document.getElementById('subtitle'),
 				key: document.getElementById("key"),
+				autoRefreshLabel: document.getElementById('autoRefreshLabel'),
 				autoRefresh: document.getElementById("autoRefresh"),
 				refresh: document.getElementById("refresh"),
 				status: document.getElementById("status"),
+				taskSummaryTitle: document.getElementById('taskSummaryTitle'),
+				nodeSummaryTitle: document.getElementById('nodeSummaryTitle'),
+				attentionTasksTitle: document.getElementById('attentionTasksTitle'),
+				attentionNodesTitle: document.getElementById('attentionNodesTitle'),
+				recentAuditTitle: document.getElementById('recentAuditTitle'),
+				researchTitle: document.getElementById('researchTitle'),
+				researchQueueTitle: document.getElementById('researchQueueTitle'),
+				researchDetailsTitle: document.getElementById('researchDetailsTitle'),
+				researchTrendTitle: document.getElementById('researchTrendTitle'),
+				compareTitle: document.getElementById('compareTitle'),
 				taskSummary: document.getElementById("taskSummary"),
 				nodeSummary: document.getElementById("nodeSummary"),
 				attentionTasks: document.getElementById("attentionTasks"),
@@ -374,6 +510,40 @@ export function renderAdminDashboardPage(): string {
 				compareResult: document.getElementById("compareResult")
 			};
 
+			function applyStaticLanguage() {
+				document.documentElement.lang = language;
+				els.language.value = language;
+				els.subtitle.textContent = t('subtitle');
+				els.key.placeholder = t('keyPlaceholder');
+				els.autoRefreshLabel.lastChild.textContent = ' ' + t('auto5s');
+				els.refresh.textContent = t('refresh');
+				els.taskSummaryTitle.textContent = t('taskSummaryTitle');
+				els.nodeSummaryTitle.textContent = t('nodeSummaryTitle');
+				els.attentionTasksTitle.textContent = t('attentionTasksTitle');
+				els.attentionNodesTitle.textContent = t('attentionNodesTitle');
+				els.recentAuditTitle.textContent = t('recentAuditTitle');
+				els.researchTitle.textContent = t('researchTitle');
+				els.researchQueueTitle.textContent = t('researchQueueTitle');
+				els.researchDetailsTitle.textContent = t('researchDetailsTitle');
+				els.researchTrendTitle.textContent = t('researchTrendTitle');
+				els.compareTitle.textContent = t('compareTitle');
+				els.expName.placeholder = t('expNamePlaceholder');
+				els.expModel.placeholder = t('expModelPlaceholder');
+				els.expPrompt.placeholder = t('expPromptPlaceholder');
+				els.createExperiment.textContent = t('createExperiment');
+				els.refreshResearch.textContent = t('refreshResearch');
+				els.runCompare.textContent = t('runCompare');
+				if (!selectedExperimentId) {
+					els.researchDetails.innerHTML = t('researchDetailsHint');
+				}
+				if (!researchItems.length) {
+					els.researchTrend.innerHTML = t('researchTrendEmpty');
+				}
+				if (!compareSnapshot) {
+					els.compareResult.innerHTML = t('compareHint');
+				}
+			}
+
 			let autoRefreshTimer = null;
 			let selectedExperimentId = null;
 			let researchItems = [];
@@ -396,19 +566,19 @@ export function renderAdminDashboardPage(): string {
 
 			function renderDashboard(data) {
 				els.taskSummary.innerHTML = [
-					row("Osszes", data.tasks.total),
-					row("Fuggo", data.tasks.pending),
-					row("Berletben", data.tasks.leased),
-					row("Befejezett", data.tasks.completed, "ok"),
-					row("Sikertelen", data.tasks.failed, "warn")
+					row(t('total'), data.tasks.total),
+					row(t('pending'), data.tasks.pending),
+					row(t('leased'), data.tasks.leased),
+					row(t('completed'), data.tasks.completed, "ok"),
+					row(t('failed'), data.tasks.failed, "warn")
 				].join("");
 
 				els.nodeSummary.innerHTML = [
-					row("Osszes", data.nodes.total),
-					row("Aktiv", data.nodes.active),
-					row("Engedelyezett", data.nodes.enabled, "ok"),
-					row("Tiltott", data.nodes.disabled, data.nodes.disabled > 0 ? "warn" : "ok"),
-					row("Karanten", data.nodes.quarantined, data.nodes.quarantined > 0 ? "warn" : "ok")
+					row(t('total'), data.nodes.total),
+					row(t('active'), data.nodes.active),
+					row(t('enabled'), data.nodes.enabled, "ok"),
+					row(t('disabled'), data.nodes.disabled, data.nodes.disabled > 0 ? "warn" : "ok"),
+					row(t('quarantine'), data.nodes.quarantined, data.nodes.quarantined > 0 ? "warn" : "ok")
 				].join("");
 
 				els.attentionTasks.innerHTML = data.attentionTasks.length
@@ -421,7 +591,7 @@ export function renderAdminDashboardPage(): string {
 									'</div></div></div>'
 							)
 							.join("")
-					: '<div class="mono">Nincs figyelmet igenylo feladat.</div>';
+					: '<div class="mono">' + t('noAttentionTasks') + '</div>';
 
 				els.attentionNodes.innerHTML = data.attentionNodes.length
 					? data.attentionNodes
@@ -433,7 +603,7 @@ export function renderAdminDashboardPage(): string {
 									Math.round(item.details.rejectionRate * 100) + '% | seen=' + age(item.details.lastSeenAgeMs) + '</div></div></div>'
 							)
 							.join("")
-					: '<div class="mono">Nincs figyelmet igenylo node.</div>';
+					: '<div class="mono">' + t('noAttentionNodes') + '</div>';
 
 				els.recentAudit.innerHTML = data.recentAudit.length
 					? data.recentAudit
@@ -446,7 +616,7 @@ export function renderAdminDashboardPage(): string {
 									'</div></div></div>'
 							)
 							.join("")
-					: '<div class="mono">Nincs audit esemeny.</div>';
+					: '<div class="mono">' + t('noAudit') + '</div>';
 			}
 
 			function toNumber(value, fallback) {
@@ -457,7 +627,7 @@ export function renderAdminDashboardPage(): string {
 
 			function renderResearchList(items) {
 				if (!items.length) {
-					els.researchList.innerHTML = '<div class="mono">Meg nincs kiserlet.</div>';
+					els.researchList.innerHTML = '<div class="mono">' + t('noExperiments') + '</div>';
 					return;
 				}
 
@@ -467,7 +637,7 @@ export function renderAdminDashboardPage(): string {
 							'<div class="row"><div><strong>' + item.name + '</strong><div class="mono">' +
 							item.experimentId.slice(0, 8) + ' | ' + item.status + ' | best=' +
 							(item.bestScore === null ? 'n/a' : item.bestScore.toFixed(3)) + '</div></div>' +
-							'<button class="mini-btn" data-exp-id="' + item.experimentId + '">Megnyitas</button></div>'
+							'<button class="mini-btn" data-exp-id="' + item.experimentId + '">' + t('open') + '</button></div>'
 					)
 					.join('');
 
@@ -485,7 +655,7 @@ export function renderAdminDashboardPage(): string {
 					.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
 				if (!points.length) {
-					els.researchTrend.innerHTML = 'Meg nincs befejezett kiserlet.';
+					els.researchTrend.innerHTML = t('researchTrendEmpty');
 					return;
 				}
 
@@ -521,8 +691,8 @@ export function renderAdminDashboardPage(): string {
 
 			function renderCompareSelectors(items) {
 				if (!items.length) {
-					els.compareA.innerHTML = '<option value="">Nincs kiserlet</option>';
-					els.compareB.innerHTML = '<option value="">Nincs kiserlet</option>';
+					els.compareA.innerHTML = '<option value="">' + t('noExperimentOption') + '</option>';
+					els.compareB.innerHTML = '<option value="">' + t('noExperimentOption') + '</option>';
 					return;
 				}
 
@@ -656,7 +826,7 @@ export function renderAdminDashboardPage(): string {
 
 			function exportCompare(format) {
 				if (!compareSnapshot) {
-					els.status.textContent = 'Elobb futtasd az osszehasonlitast.';
+					els.status.textContent = t('runCompareFirst');
 					return;
 				}
 
@@ -667,7 +837,7 @@ export function renderAdminDashboardPage(): string {
 						'application/json;charset=utf-8',
 						JSON.stringify(compareSnapshot, null, 2)
 					);
-					els.status.textContent = 'JSON export kesz.';
+					els.status.textContent = t('jsonExportDone');
 					return;
 				}
 
@@ -682,7 +852,7 @@ export function renderAdminDashboardPage(): string {
 					.map((line) => line.map((cell) => toCsvCell(cell)).join(','))
 					.join('\n');
 				downloadTextFile('compare-' + stamp + '.csv', 'text/csv;charset=utf-8', csv);
-				els.status.textContent = 'CSV export kesz.';
+				els.status.textContent = t('csvExportDone');
 			}
 
 			async function loadExperimentById(experimentId) {
@@ -706,13 +876,13 @@ export function renderAdminDashboardPage(): string {
 				compareAId = els.compareA.value;
 				compareBId = els.compareB.value;
 				if (!compareAId || !compareBId) {
-					els.compareResult.innerHTML = 'Elobb valassz ket kiserletet.';
+					els.compareResult.innerHTML = t('pickTwoExperiments');
 					return;
 				}
 
 				const [a, b] = await Promise.all([loadExperimentById(compareAId), loadExperimentById(compareBId)]);
 				if (!a || !b) {
-					els.compareResult.innerHTML = 'Az osszehasonlitas lekerese sikertelen.';
+					els.compareResult.innerHTML = t('compareLoadFailed');
 					return;
 				}
 
@@ -737,7 +907,7 @@ export function renderAdminDashboardPage(): string {
 
 			function renderResearchDetails(item) {
 				if (!item) {
-					els.researchDetails.innerHTML = 'Valassz egy kiserletet a reszletekhez.';
+					els.researchDetails.innerHTML = t('researchDetailsHint');
 					return;
 				}
 
@@ -771,7 +941,7 @@ export function renderAdminDashboardPage(): string {
 				});
 
 				if (!response.ok) {
-					els.researchList.innerHTML = '<div class="mono">Kutatasi lista lekerese sikertelen: ' + response.status + '</div>';
+					els.researchList.innerHTML = '<div class="mono">' + t('researchListLoadFailed') + response.status + '</div>';
 					return;
 				}
 
@@ -793,7 +963,7 @@ export function renderAdminDashboardPage(): string {
 				});
 
 				if (!response.ok) {
-					els.researchDetails.innerHTML = 'Kiserlet betoltes sikertelen: ' + response.status;
+					els.researchDetails.innerHTML = t('experimentLoadFailed') + response.status;
 					return;
 				}
 
@@ -805,7 +975,7 @@ export function renderAdminDashboardPage(): string {
 			async function createExperiment() {
 				const key = els.key.value.trim();
 				if (!key) {
-					els.status.textContent = 'Elobb add meg az admin API kulcsot.';
+					els.status.textContent = t('enterAdminKey');
 					return;
 				}
 
@@ -819,7 +989,7 @@ export function renderAdminDashboardPage(): string {
 					prompt: els.expPrompt.value.trim()
 				};
 
-				els.status.textContent = 'Kiserlet letrehozasa...';
+				els.status.textContent = t('creatingExperiment');
 				const response = await fetch('/research/experiments', {
 					method: 'POST',
 					headers: {
@@ -831,13 +1001,13 @@ export function renderAdminDashboardPage(): string {
 
 				if (!response.ok) {
 					const text = await response.text();
-					els.status.textContent = 'Letrehozas sikertelen: ' + response.status + ' ' + text;
+					els.status.textContent = t('createFailed') + response.status + ' ' + text;
 					return;
 				}
 
 				const created = await response.json();
 				selectedExperimentId = created.experimentId;
-				els.status.textContent = 'Kiserlet letrehozva: ' + created.experimentId.slice(0, 8);
+				els.status.textContent = t('experimentCreated') + created.experimentId.slice(0, 8);
 				await loadResearchList();
 				await loadExperimentDetails();
 			}
@@ -853,13 +1023,13 @@ export function renderAdminDashboardPage(): string {
 			async function loadDashboard() {
 				const key = els.key.value.trim();
 				if (!key) {
-					els.status.textContent = "Elobb add meg az admin API kulcsot.";
+					els.status.textContent = t('enterAdminKey');
 					return;
 				}
 
 				localStorage.setItem("bioSwarmAdminKey", key);
 
-				els.status.textContent = "Vezerlopult betoltese...";
+				els.status.textContent = t('loadingDashboard');
 
 				try {
 					const response = await fetch("/admin/dashboard", {
@@ -870,15 +1040,15 @@ export function renderAdminDashboardPage(): string {
 
 					if (!response.ok) {
 						const text = await response.text();
-						els.status.textContent = "Vezerlopult lekeres sikertelen: " + response.status + " " + text;
+						els.status.textContent = t('dashboardLoadFailed') + response.status + " " + text;
 						return;
 					}
 
 					const payload = await response.json();
 					renderDashboard(payload);
-					els.status.textContent = "Frissitve: " + new Date().toLocaleTimeString();
+					els.status.textContent = t('updatedAt') + new Date().toLocaleTimeString();
 				} catch (error) {
-					els.status.textContent = "Keres sikertelen: " + error;
+					els.status.textContent = t('requestFailed') + error;
 				}
 			}
 
@@ -906,12 +1076,22 @@ export function renderAdminDashboardPage(): string {
 				els.key.value = rememberedKey;
 			}
 
+			applyStaticLanguage();
+
 			if (localStorage.getItem("bioSwarmAutoRefresh") === "off") {
 				els.autoRefresh.checked = false;
 			}
 
 			els.refresh.addEventListener("click", () => {
 				void loadAll();
+			});
+			els.language.addEventListener('change', () => {
+				language = els.language.value === 'en' ? 'en' : 'hu';
+				localStorage.setItem('bioSwarmLanguage', language);
+				applyStaticLanguage();
+				if (els.key.value.trim()) {
+					void loadAll();
+				}
 			});
 			els.refreshResearch.addEventListener("click", () => {
 				void loadResearchList();
