@@ -284,6 +284,10 @@ export function renderAdminDashboardPage(): string {
 
 				<article class="card wide">
 					<h3 id="gpuNodesTitle">Desktop GPU Node-ok</h3>
+					<div class="form-row">
+						<label id="gpuActiveOnlyLabel" class="toggle"><input id="gpuActiveOnly" type="checkbox" /> Csak aktiv</label>
+						<input id="gpuMinVram" class="input" type="number" min="0" step="1" value="0" style="min-width: 140px" />
+					</div>
 					<div id="gpuNodes"></div>
 				</article>
 
@@ -370,6 +374,8 @@ export function renderAdminDashboardPage(): string {
 					researchTrendTitle: 'Kutatasi Trend (Legjobb Pontszam)',
 					compareTitle: 'Kiserlet Osszehasonlitas (A/B)',
 					gpuNodesTitle: 'Desktop GPU Node-ok',
+					gpuActiveOnly: 'Csak aktiv',
+					gpuMinVramLabel: 'Min VRAM (GB)',
 					expNamePlaceholder: 'Kiserlet neve',
 					expModelPlaceholder: 'Modell verzio',
 					expPromptPlaceholder: 'Kutatasi prompt',
@@ -437,6 +443,8 @@ export function renderAdminDashboardPage(): string {
 					researchTrendTitle: 'Research Trend (Best Score)',
 					compareTitle: 'Experiment Comparison (A/B)',
 					gpuNodesTitle: 'Desktop GPU Nodes',
+					gpuActiveOnly: 'Active only',
+					gpuMinVramLabel: 'Min VRAM (GB)',
 					expNamePlaceholder: 'Experiment name',
 					expModelPlaceholder: 'Model version',
 					expPromptPlaceholder: 'Research prompt',
@@ -509,6 +517,9 @@ export function renderAdminDashboardPage(): string {
 				attentionTasksTitle: document.getElementById('attentionTasksTitle'),
 				attentionNodesTitle: document.getElementById('attentionNodesTitle'),
 				gpuNodesTitle: document.getElementById('gpuNodesTitle'),
+				gpuActiveOnlyLabel: document.getElementById('gpuActiveOnlyLabel'),
+				gpuActiveOnly: document.getElementById('gpuActiveOnly'),
+				gpuMinVram: document.getElementById('gpuMinVram'),
 				recentAuditTitle: document.getElementById('recentAuditTitle'),
 				researchTitle: document.getElementById('researchTitle'),
 				researchQueueTitle: document.getElementById('researchQueueTitle'),
@@ -553,6 +564,9 @@ export function renderAdminDashboardPage(): string {
 				els.attentionTasksTitle.textContent = t('attentionTasksTitle');
 				els.attentionNodesTitle.textContent = t('attentionNodesTitle');
 				els.gpuNodesTitle.textContent = t('gpuNodesTitle');
+				els.gpuActiveOnlyLabel.lastChild.textContent = ' ' + t('gpuActiveOnly');
+				els.gpuMinVram.setAttribute('aria-label', t('gpuMinVramLabel'));
+				els.gpuMinVram.title = t('gpuMinVramLabel');
 				els.recentAuditTitle.textContent = t('recentAuditTitle');
 				els.researchTitle.textContent = t('researchTitle');
 				els.researchQueueTitle.textContent = t('researchQueueTitle');
@@ -584,6 +598,7 @@ export function renderAdminDashboardPage(): string {
 			let autoRefreshTimer = null;
 			let selectedExperimentId = null;
 			let researchItems = [];
+			let gpuRawItems = [];
 			let gpuNodeItems = [];
 			let compareAId = null;
 			let compareBId = null;
@@ -688,6 +703,31 @@ export function renderAdminDashboardPage(): string {
 						);
 					})
 					.join('');
+			}
+
+			function applyGpuFilters() {
+				const activeOnly = Boolean(els.gpuActiveOnly.checked);
+				const minVramRaw = Number(els.gpuMinVram.value);
+				const minVram = Number.isFinite(minVramRaw) ? Math.max(0, minVramRaw) : 0;
+
+				gpuNodeItems = gpuRawItems.filter((item) => {
+					if (activeOnly && !item.active) {
+						return false;
+					}
+
+					const vram = Number(item.capabilities?.gpu?.vramGb ?? 0);
+					if (Number.isFinite(vram) && vram < minVram) {
+						return false;
+					}
+
+					if (!Number.isFinite(vram) && minVram > 0) {
+						return false;
+					}
+
+					return true;
+				});
+
+				renderGpuNodes(gpuNodeItems);
 			}
 
 			function toNumber(value, fallback) {
@@ -1032,10 +1072,10 @@ export function renderAdminDashboardPage(): string {
 
 					const data = await response.json();
 					const items = Array.isArray(data.items) ? data.items : [];
-					gpuNodeItems = items.filter(
+					gpuRawItems = items.filter(
 						(item) => item && item.capabilities && item.capabilities.nodeClass === 'desktop_gpu' && item.capabilities.gpu
 					);
-					renderGpuNodes(gpuNodeItems);
+					applyGpuFilters();
 				} catch (_error) {
 					// Keep dashboard usable even if optional GPU list fetch fails.
 				}
@@ -1209,6 +1249,12 @@ export function renderAdminDashboardPage(): string {
 			});
 			els.compareB.addEventListener('change', () => {
 				compareBId = els.compareB.value;
+			});
+			els.gpuActiveOnly.addEventListener('change', () => {
+				applyGpuFilters();
+			});
+			els.gpuMinVram.addEventListener('input', () => {
+				applyGpuFilters();
 			});
 			els.autoRefresh.addEventListener("change", syncAutoRefresh);
 			els.key.addEventListener("keydown", (event) => {
