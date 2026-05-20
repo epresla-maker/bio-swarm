@@ -112,6 +112,8 @@ The orchestrator performs:
    pnpm dev:stack
    ```
 
+   If an orchestrator is already healthy at `ORCHESTRATOR_URL` (default `http://127.0.0.1:4000`), the script reuses it instead of starting a second instance.
+
 5. Run tests:
 
    ```bash
