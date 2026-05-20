@@ -256,6 +256,10 @@ export function buildApp(options?: {
   );
 
   app.post<{ Params: { id: string } }>("/tasks/:id/cancel", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
     const verdict = cancelTask(request.params.id);
 
     if (!verdict.canceled && verdict.reason === "task_not_found") {
@@ -270,6 +274,10 @@ export function buildApp(options?: {
   });
 
   app.post<{ Params: { id: string } }>("/tasks/:id/requeue", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
     const verdict = requeueTask(request.params.id);
 
     if (!verdict.requeued && verdict.reason === "task_not_found") {

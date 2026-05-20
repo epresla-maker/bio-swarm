@@ -139,8 +139,8 @@ The orchestrator performs:
 - `GET /tasks/:id/verdicts?limit=50`
 - `GET /tasks/claim?nodeId=...`
 - `POST /tasks/:id/result`
-- `POST /tasks/:id/cancel`
-- `POST /tasks/:id/requeue`
+- `POST /tasks/:id/cancel` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `POST /tasks/:id/requeue` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /nodes?active=true|false&limit=50`
 - `GET /nodes/:id`
 - `GET /nodes/:id/stats`

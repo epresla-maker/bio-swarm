@@ -152,7 +152,7 @@ test("task can be created, claimed and completed", async (t) => {
 });
 
 test("POST /tasks/:id/cancel cancels pending task and blocks further claims", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
@@ -167,7 +167,14 @@ test("POST /tasks/:id/cancel cancels pending task and blocks further claims", as
   assert.equal(created.statusCode, 201);
   const task = created.json();
 
-  const canceled = await app.inject({ method: "POST", url: `/tasks/${task.id}/cancel` });
+  const unauthorized = await app.inject({ method: "POST", url: `/tasks/${task.id}/cancel` });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const canceled = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/cancel`,
+    headers: { "x-admin-key": "ops-key" }
+  });
   assert.equal(canceled.statusCode, 200);
   assert.equal(canceled.json().canceled, true);
 
@@ -178,12 +185,16 @@ test("POST /tasks/:id/cancel cancels pending task and blocks further claims", as
   assert.equal(snapshot.statusCode, 200);
   assert.equal(snapshot.json().state, "failed");
 
-  const missing = await app.inject({ method: "POST", url: "/tasks/not-found/cancel" });
+  const missing = await app.inject({
+    method: "POST",
+    url: "/tasks/not-found/cancel",
+    headers: { "x-admin-key": "ops-key" }
+  });
   assert.equal(missing.statusCode, 404);
 });
 
 test("canceling completed task returns conflict", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
@@ -209,7 +220,11 @@ test("canceling completed task returns conflict", async (t) => {
     }
   });
 
-  const canceled = await app.inject({ method: "POST", url: `/tasks/${task.id}/cancel` });
+  const canceled = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/cancel`,
+    headers: { "x-admin-key": "ops-key" }
+  });
   assert.equal(canceled.statusCode, 409);
   assert.equal(canceled.json().reason, "task_already_completed");
 });
@@ -217,7 +232,7 @@ test("canceling completed task returns conflict", async (t) => {
 test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
   let now = 1_000;
   configureStoreRuntime({ leaseTtlMs: 100, maxAttempts: 1, nowProvider: () => now });
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
@@ -242,7 +257,14 @@ test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
   assert.equal(failedSnapshot.statusCode, 200);
   assert.equal(failedSnapshot.json().state, "failed");
 
-  const requeued = await app.inject({ method: "POST", url: `/tasks/${task.id}/requeue` });
+  const unauthorized = await app.inject({ method: "POST", url: `/tasks/${task.id}/requeue` });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const requeued = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/requeue`,
+    headers: { "x-admin-key": "ops-key" }
+  });
   assert.equal(requeued.statusCode, 200);
   assert.equal(requeued.json().requeued, true);
 
@@ -256,11 +278,19 @@ test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
   assert.equal(reclaimed.statusCode, 200);
   assert.equal(reclaimed.json().id, task.id);
 
-  const badState = await app.inject({ method: "POST", url: `/tasks/${task.id}/requeue` });
+  const badState = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/requeue`,
+    headers: { "x-admin-key": "ops-key" }
+  });
   assert.equal(badState.statusCode, 409);
   assert.equal(badState.json().reason, "task_not_failed");
 
-  const missing = await app.inject({ method: "POST", url: "/tasks/not-found/requeue" });
+  const missing = await app.inject({
+    method: "POST",
+    url: "/tasks/not-found/requeue",
+    headers: { "x-admin-key": "ops-key" }
+  });
   assert.equal(missing.statusCode, 404);
 });
 
@@ -704,7 +734,7 @@ test("admin audit endpoint supports filters and validation", async (t) => {
     payload: { kind: "bio_prescreen", payload: { sample: "cancel-audit" }, quorum: 1 }
   });
   const cancelTaskId = cancelTask.json().id;
-  await app.inject({ method: "POST", url: `/tasks/${cancelTaskId}/cancel` });
+  await app.inject({ method: "POST", url: `/tasks/${cancelTaskId}/cancel`, headers: { "x-admin-key": "audit-key" } });
 
   const canceledEvents = await app.inject({
     method: "GET",
@@ -714,7 +744,7 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   assert.equal(canceledEvents.statusCode, 200);
   assert.ok(canceledEvents.json().items.some((item: { eventType: string }) => item.eventType === "task_canceled"));
 
-  await app.inject({ method: "POST", url: `/tasks/${cancelTaskId}/requeue` });
+  await app.inject({ method: "POST", url: `/tasks/${cancelTaskId}/requeue`, headers: { "x-admin-key": "audit-key" } });
   const requeuedEvents = await app.inject({
     method: "GET",
     url: "/admin/audit?eventType=task_requeued",
