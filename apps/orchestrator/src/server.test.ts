@@ -298,4 +298,29 @@ test("admin audit endpoint supports filters and validation", async (t) => {
 
   const unauthorized = await app.inject({ method: "GET", url: "/admin/audit" });
   assert.equal(unauthorized.statusCode, 401);
+
+  const exportJsonl = await app.inject({
+    method: "GET",
+    url: "/admin/audit/export?format=jsonl&limit=10",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(exportJsonl.statusCode, 200);
+  assert.match(exportJsonl.headers["content-type"] ?? "", /application\/x-ndjson/);
+  assert.ok(exportJsonl.body.includes("eventType"));
+
+  const exportCsv = await app.inject({
+    method: "GET",
+    url: "/admin/audit/export?format=csv&limit=10",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(exportCsv.statusCode, 200);
+  assert.match(exportCsv.headers["content-type"] ?? "", /text\/csv/);
+  assert.ok(exportCsv.body.startsWith("at,eventType,taskId,nodeId,details"));
+
+  const invalidFormat = await app.inject({
+    method: "GET",
+    url: "/admin/audit/export?format=xml",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(invalidFormat.statusCode, 400);
 });

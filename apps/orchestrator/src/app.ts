@@ -21,6 +21,14 @@ export function buildApp(options?: {
     options?.adminRateLimitWindowMs ?? Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS ?? 60_000);
   const nowProvider = options?.nowProvider ?? (() => Date.now());
   const adminRateMap = new Map<string, AdminRateState>();
+  const allowedAuditEventTypes = new Set([
+    "task_created",
+    "task_claimed",
+    "result_submitted",
+    "result_rejected",
+    "heartbeat_received",
+    "lease_expired"
+  ]);
 
   function enforceAdminAccess(request: { headers: Record<string, string | string[] | undefined>; ip: string }, reply: { status: (code: number) => { send: (payload: Record<string, string>) => unknown } }): boolean {
     if (!adminApiKey) {
@@ -51,6 +59,62 @@ export function buildApp(options?: {
 
     existing.count += 1;
     return true;
+  }
+
+  function parseAuditQuery(
+    request: {
+      query: {
+        limit?: string;
+        nodeId?: string;
+        taskId?: string;
+        eventType?: string;
+        since?: string;
+        until?: string;
+      };
+    },
+    reply: { status: (code: number) => { send: (payload: Record<string, string>) => unknown } }
+  ) {
+    const rawLimit = request.query.limit;
+    const parsedLimit = rawLimit ? Number(rawLimit) : 50;
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+      reply.status(400).send({ error: "invalid_limit" });
+      return;
+    }
+
+    const eventType = request.query.eventType;
+    if (eventType && !allowedAuditEventTypes.has(eventType)) {
+      reply.status(400).send({ error: "invalid_event_type" });
+      return;
+    }
+
+    const since = request.query.since ? Date.parse(request.query.since) : undefined;
+    const until = request.query.until ? Date.parse(request.query.until) : undefined;
+
+    if (typeof since === "number" && Number.isNaN(since)) {
+      reply.status(400).send({ error: "invalid_since" });
+      return;
+    }
+
+    if (typeof until === "number" && Number.isNaN(until)) {
+      reply.status(400).send({ error: "invalid_until" });
+      return;
+    }
+
+    return {
+      limit: parsedLimit,
+      nodeId: request.query.nodeId,
+      taskId: request.query.taskId,
+      eventType: eventType as
+        | "task_created"
+        | "task_claimed"
+        | "result_submitted"
+        | "result_rejected"
+        | "heartbeat_received"
+        | "lease_expired"
+        | undefined,
+      since,
+      until
+    };
   }
 
   app.get("/health", async () => {
@@ -178,55 +242,70 @@ export function buildApp(options?: {
         return;
       }
 
-      const rawLimit = request.query.limit;
-      const parsedLimit = rawLimit ? Number(rawLimit) : 50;
-      if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
-        return reply.status(400).send({ error: "invalid_limit" });
+      const query = parseAuditQuery(request, reply);
+      if (!query) {
+        return;
       }
 
-      const eventType = request.query.eventType;
-      const allowedEventTypes = new Set([
-        "task_created",
-        "task_claimed",
-        "result_submitted",
-        "result_rejected",
-        "heartbeat_received",
-        "lease_expired"
-      ]);
-      if (eventType && !allowedEventTypes.has(eventType)) {
-        return reply.status(400).send({ error: "invalid_event_type" });
-      }
-
-      const since = request.query.since ? Date.parse(request.query.since) : undefined;
-      const until = request.query.until ? Date.parse(request.query.until) : undefined;
-
-      if (typeof since === "number" && Number.isNaN(since)) {
-        return reply.status(400).send({ error: "invalid_since" });
-      }
-
-      if (typeof until === "number" && Number.isNaN(until)) {
-        return reply.status(400).send({ error: "invalid_until" });
-      }
-
-      return {
-        items: getAuditLog({
-          limit: parsedLimit,
-          nodeId: request.query.nodeId,
-          taskId: request.query.taskId,
-          eventType: eventType as
-            | "task_created"
-            | "task_claimed"
-            | "result_submitted"
-            | "result_rejected"
-            | "heartbeat_received"
-            | "lease_expired"
-            | undefined,
-          since,
-          until
-        })
-      };
+      return { items: getAuditLog(query) };
     }
   );
+
+  app.get<{
+    Querystring: {
+      format?: string;
+      limit?: string;
+      nodeId?: string;
+      taskId?: string;
+      eventType?: string;
+      since?: string;
+      until?: string;
+    };
+  }>("/admin/audit/export", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const format = request.query.format ?? "jsonl";
+    if (format !== "jsonl" && format !== "csv") {
+      return reply.status(400).send({ error: "invalid_format" });
+    }
+
+    const query = parseAuditQuery(request, reply);
+    if (!query) {
+      return;
+    }
+
+    const items = getAuditLog(query);
+
+    if (format === "jsonl") {
+      const body = items.map((item) => JSON.stringify(item)).join("\n");
+      reply.header("content-type", "application/x-ndjson; charset=utf-8");
+      return reply.send(body);
+    }
+
+    const csvEscape = (value: string): string => {
+      if (value.includes(",") || value.includes("\"") || value.includes("\n")) {
+        return `"${value.replace(/\"/g, '""')}"`;
+      }
+      return value;
+    };
+
+    const header = "at,eventType,taskId,nodeId,details";
+    const rows = items.map((item) => {
+      const details = item.details ? JSON.stringify(item.details) : "";
+      return [
+        csvEscape(item.at),
+        csvEscape(item.eventType),
+        csvEscape(item.taskId ?? ""),
+        csvEscape(item.nodeId ?? ""),
+        csvEscape(details)
+      ].join(",");
+    });
+
+    reply.header("content-type", "text/csv; charset=utf-8");
+    return reply.send([header, ...rows].join("\n"));
+  });
 
   return app;
 }
