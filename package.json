@@ -6,6 +6,9 @@
   "packageManager": "pnpm@10.0.0",
   "scripts": {
     "dev": "pnpm -r --parallel --stream dev",
+    "dev:orchestrator": "pnpm --filter @bio-swarm/orchestrator dev",
+    "dev:edge": "pnpm --filter @bio-swarm/edge-runtime dev",
+    "dev:stack": "bash scripts/dev-stack.sh",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",

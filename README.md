@@ -94,6 +94,24 @@ The orchestrator performs:
    pnpm --filter @bio-swarm/edge-runtime dev
    ```
 
+4a. Start orchestrator only via shortcut:
+
+   ```bash
+   pnpm dev:orchestrator
+   ```
+
+4b. Start edge runtime only via shortcut:
+
+   ```bash
+   pnpm dev:edge
+   ```
+
+4c. Start orchestrator + edge together:
+
+   ```bash
+   pnpm dev:stack
+   ```
+
 5. Run tests:
 
    ```bash
