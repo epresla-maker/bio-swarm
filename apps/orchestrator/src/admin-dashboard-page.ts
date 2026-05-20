@@ -335,6 +335,8 @@ export function renderAdminDashboardPage(): string {
 					</div>
 					<div class="form-row">
 						<button id="runCompare" class="mini-btn" type="button">Compare</button>
+						<button id="exportCompareCsv" class="mini-btn" type="button">Export CSV</button>
+						<button id="exportCompareJson" class="mini-btn" type="button">Export JSON</button>
 					</div>
 					<div id="compareResult" class="mono">Choose two experiments and click Compare.</div>
 				</article>
@@ -367,6 +369,8 @@ export function renderAdminDashboardPage(): string {
 				compareA: document.getElementById("compareA"),
 				compareB: document.getElementById("compareB"),
 				runCompare: document.getElementById("runCompare"),
+				exportCompareCsv: document.getElementById("exportCompareCsv"),
+				exportCompareJson: document.getElementById("exportCompareJson"),
 				compareResult: document.getElementById("compareResult")
 			};
 
@@ -375,6 +379,7 @@ export function renderAdminDashboardPage(): string {
 			let researchItems = [];
 			let compareAId = null;
 			let compareBId = null;
+			let compareSnapshot = null;
 
 			function row(label, value, badgeClass) {
 				const badge = badgeClass ? '<span class="badge ' + badgeClass + '">' + value + '</span>' : String(value);
@@ -572,6 +577,114 @@ export function renderAdminDashboardPage(): string {
 				return row(label, value, badge);
 			}
 
+			function getCompareRows(a, b) {
+				return [
+					{
+						metric: 'Best Score',
+						a: a.bestScore,
+						b: b.bestScore,
+						delta:
+							typeof a.bestScore === 'number' && typeof b.bestScore === 'number' ? a.bestScore - b.bestScore : null
+					},
+					{
+						metric: 'Convergence',
+						a: metric(a, 'convergence'),
+						b: metric(b, 'convergence'),
+						delta:
+							typeof metric(a, 'convergence') === 'number' && typeof metric(b, 'convergence') === 'number'
+								? metric(a, 'convergence') - metric(b, 'convergence')
+								: null
+					},
+					{
+						metric: 'Stability',
+						a: metric(a, 'stability'),
+						b: metric(b, 'stability'),
+						delta:
+							typeof metric(a, 'stability') === 'number' && typeof metric(b, 'stability') === 'number'
+								? metric(a, 'stability') - metric(b, 'stability')
+								: null
+					},
+					{
+						metric: 'Diversity',
+						a: metric(a, 'diversityIndex'),
+						b: metric(b, 'diversityIndex'),
+						delta:
+							typeof metric(a, 'diversityIndex') === 'number' && typeof metric(b, 'diversityIndex') === 'number'
+								? metric(a, 'diversityIndex') - metric(b, 'diversityIndex')
+								: null
+					},
+					{
+						metric: 'Mutation Rate',
+						a: a.mutationRate,
+						b: b.mutationRate,
+						delta:
+							typeof a.mutationRate === 'number' && typeof b.mutationRate === 'number'
+								? a.mutationRate - b.mutationRate
+								: null
+					},
+					{
+						metric: 'Population',
+						a: a.populationSize,
+						b: b.populationSize,
+						delta:
+							typeof a.populationSize === 'number' && typeof b.populationSize === 'number'
+								? a.populationSize - b.populationSize
+								: null
+					}
+				];
+			}
+
+			function downloadTextFile(fileName, mimeType, text) {
+				const blob = new Blob([text], { type: mimeType });
+				const href = URL.createObjectURL(blob);
+				const link = document.createElement('a');
+				link.href = href;
+				link.download = fileName;
+				document.body.appendChild(link);
+				link.click();
+				link.remove();
+				URL.revokeObjectURL(href);
+			}
+
+			function toCsvCell(value) {
+				const raw = value === null || value === undefined ? '' : String(value);
+				if (raw.includes(',') || raw.includes('"') || raw.includes('\n')) {
+					return '"' + raw.replace(/"/g, '""') + '"';
+				}
+				return raw;
+			}
+
+			function exportCompare(format) {
+				if (!compareSnapshot) {
+					els.status.textContent = 'Run compare first.';
+					return;
+				}
+
+				const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+				if (format === 'json') {
+					downloadTextFile(
+						'compare-' + stamp + '.json',
+						'application/json;charset=utf-8',
+						JSON.stringify(compareSnapshot, null, 2)
+					);
+					els.status.textContent = 'Compare JSON exported.';
+					return;
+				}
+
+				const header = ['metric', 'a', 'b', 'delta'];
+				const rows = compareSnapshot.rows.map((row) => [
+					row.metric,
+					row.a,
+					row.b,
+					row.delta
+				]);
+				const csv = [header, ...rows]
+					.map((line) => line.map((cell) => toCsvCell(cell)).join(','))
+					.join('\n');
+				downloadTextFile('compare-' + stamp + '.csv', 'text/csv;charset=utf-8', csv);
+				els.status.textContent = 'Compare CSV exported.';
+			}
+
 			async function loadExperimentById(experimentId) {
 				const key = els.key.value.trim();
 				if (!key || !experimentId) {
@@ -602,6 +715,14 @@ export function renderAdminDashboardPage(): string {
 					els.compareResult.innerHTML = 'Compare fetch failed.';
 					return;
 				}
+
+				const rows = getCompareRows(a, b);
+				compareSnapshot = {
+					generatedAt: new Date().toISOString(),
+					a: { id: a.experimentId, name: a.name },
+					b: { id: b.experimentId, name: b.name },
+					rows
+				};
 
 				els.compareResult.innerHTML = [
 					'<div class="mono"><strong>A:</strong> ' + a.name + ' | <strong>B:</strong> ' + b.name + '</div>',
@@ -803,6 +924,12 @@ export function renderAdminDashboardPage(): string {
 			});
 			els.runCompare.addEventListener('click', () => {
 				void runCompare();
+			});
+			els.exportCompareCsv.addEventListener('click', () => {
+				exportCompare('csv');
+			});
+			els.exportCompareJson.addEventListener('click', () => {
+				exportCompare('json');
 			});
 			els.compareA.addEventListener('change', () => {
 				compareAId = els.compareA.value;
