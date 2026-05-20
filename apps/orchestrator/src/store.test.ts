@@ -183,3 +183,20 @@ test("audit log persists to disk and can be loaded again", () => {
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("audit log rotates when file exceeds max bytes", () => {
+  resetStoreForTests();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bio-swarm-audit-rotate-"));
+  const file = path.join(dir, "audit.jsonl");
+
+  configureAuditLogPersistence({ filePath: file, maxBytes: 120, maxFiles: 2 });
+  addTask({ kind: "bio_prescreen", payload: { sample: "rotate-1" }, quorum: 1 });
+  addTask({ kind: "bio_prescreen", payload: { sample: "rotate-2" }, quorum: 1 });
+  addTask({ kind: "bio_prescreen", payload: { sample: "rotate-3" }, quorum: 1 });
+
+  assert.equal(fs.existsSync(file), true);
+  assert.equal(fs.existsSync(`${file}.1`), true);
+  assert.equal(fs.existsSync(`${file}.2`), true);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});

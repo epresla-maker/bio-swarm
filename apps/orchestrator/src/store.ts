@@ -67,6 +67,8 @@ const MAX_VERDICT_LOG = 200;
 const auditLog: AuditLogEntry[] = [];
 const MAX_AUDIT_LOG = 500;
 let auditLogPath: string | null = null;
+let auditLogMaxBytes = Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000);
+let auditLogMaxFiles = Number(process.env.AUDIT_LOG_MAX_FILES ?? 5);
 
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
@@ -95,12 +97,28 @@ export function resetStoreForTests(): void {
   taskVerdicts.length = 0;
   auditLog.length = 0;
   auditLogPath = null;
+  auditLogMaxBytes = Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000);
+  auditLogMaxFiles = Number(process.env.AUDIT_LOG_MAX_FILES ?? 5);
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   nowProvider = () => Date.now();
 }
 
-export function configureAuditLogPersistence(filePath?: string): void {
+export function configureAuditLogPersistence(
+  config?: string | { filePath?: string; maxBytes?: number; maxFiles?: number }
+): void {
+  const filePath = typeof config === "string" ? config : config?.filePath;
+  const maxBytes = typeof config === "object" ? config.maxBytes : undefined;
+  const maxFiles = typeof config === "object" ? config.maxFiles : undefined;
+
+  if (typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0) {
+    auditLogMaxBytes = maxBytes;
+  }
+
+  if (typeof maxFiles === "number" && Number.isFinite(maxFiles) && maxFiles > 0) {
+    auditLogMaxFiles = Math.floor(maxFiles);
+  }
+
   if (!filePath) {
     auditLogPath = null;
     return;
@@ -473,8 +491,10 @@ function pushAuditEvent(event: Omit<AuditLogEntry, "at">): void {
   }
 
   try {
+    const line = `${JSON.stringify(entry)}\n`;
     fs.mkdirSync(path.dirname(auditLogPath), { recursive: true });
-    fs.appendFileSync(auditLogPath, `${JSON.stringify(entry)}\n`, "utf8");
+    rotateAuditLogIfNeeded(auditLogPath, Buffer.byteLength(line, "utf8"));
+    fs.appendFileSync(auditLogPath, line, "utf8");
   } catch {
     // Persistence failures should not break API behavior in MVP mode.
   }
@@ -509,5 +529,38 @@ function ensureAuditLogLoadedFromDisk(filePath: string): void {
     }
   } catch {
     // Ignore persistence bootstrap failures in MVP mode.
+  }
+}
+
+function rotateAuditLogIfNeeded(filePath: string, nextEntryBytes: number): void {
+  if (auditLogMaxBytes <= 0) {
+    return;
+  }
+
+  const currentSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+  if (currentSize + nextEntryBytes <= auditLogMaxBytes) {
+    return;
+  }
+
+  if (auditLogMaxFiles <= 1) {
+    fs.writeFileSync(filePath, "", "utf8");
+    return;
+  }
+
+  const lastRotated = `${filePath}.${auditLogMaxFiles}`;
+  if (fs.existsSync(lastRotated)) {
+    fs.unlinkSync(lastRotated);
+  }
+
+  for (let i = auditLogMaxFiles - 1; i >= 1; i -= 1) {
+    const src = `${filePath}.${i}`;
+    const dst = `${filePath}.${i + 1}`;
+    if (fs.existsSync(src)) {
+      fs.renameSync(src, dst);
+    }
+  }
+
+  if (fs.existsSync(filePath)) {
+    fs.renameSync(filePath, `${filePath}.1`);
   }
 }
