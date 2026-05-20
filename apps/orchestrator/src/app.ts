@@ -231,6 +231,38 @@ export function buildApp(options?: {
     return reply.status(200).send({ items: verdicts.items });
   });
 
+  app.get<{
+    Params: { id: string };
+    Querystring: { limit?: string; eventType?: string; since?: string; until?: string };
+  }>("/tasks/:id/audit", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const snapshot = getTaskSnapshot(request.params.id);
+    if (!snapshot) {
+      return reply.status(404).send({ error: "task_not_found" });
+    }
+
+    const query = parseAuditQuery(
+      {
+        query: {
+          limit: request.query.limit,
+          taskId: request.params.id,
+          eventType: request.query.eventType,
+          since: request.query.since,
+          until: request.query.until
+        }
+      },
+      reply
+    );
+    if (!query) {
+      return;
+    }
+
+    return reply.status(200).send({ items: getAuditLog(query) });
+  });
+
   app.post<{ Params: { id: string }; Body: Omit<TaskResult, "taskId" | "submittedAt"> }>(
     "/tasks/:id/result",
     async (request, reply) => {

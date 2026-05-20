@@ -542,6 +542,75 @@ test("GET /tasks/:id/verdicts returns task-specific verdict history", async (t) 
   assert.equal(invalidLimit.statusCode, 400);
 });
 
+test("GET /tasks/:id/audit returns task-specific audit history", async (t) => {
+  let now = 30_000;
+  const app = buildApp({ adminApiKey: "audit-task-key", nowProvider: () => now });
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "audit-task-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "task-audit" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  const task = created.json();
+
+  now += 1;
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-task-audit" });
+
+  now += 1;
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-task-audit",
+      checksum: "task-audit-ok",
+      score: 0.88,
+      payload: {}
+    }
+  });
+
+  const unauthorized = await app.inject({ method: "GET", url: `/tasks/${task.id}/audit` });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const all = await app.inject({
+    method: "GET",
+    url: `/tasks/${task.id}/audit?limit=10`,
+    headers: { "x-admin-key": "audit-task-key" }
+  });
+  assert.equal(all.statusCode, 200);
+  assert.ok(all.json().items.length >= 3);
+  assert.ok(all.json().items.every((item: { taskId?: string }) => item.taskId === task.id));
+
+  const submittedOnly = await app.inject({
+    method: "GET",
+    url: `/tasks/${task.id}/audit?eventType=result_submitted&limit=10`,
+    headers: { "x-admin-key": "audit-task-key" }
+  });
+  assert.equal(submittedOnly.statusCode, 200);
+  assert.equal(submittedOnly.json().items.length, 1);
+  assert.equal(submittedOnly.json().items[0].eventType, "result_submitted");
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/tasks/not-found/audit",
+    headers: { "x-admin-key": "audit-task-key" }
+  });
+  assert.equal(missing.statusCode, 404);
+
+  const invalidType = await app.inject({
+    method: "GET",
+    url: `/tasks/${task.id}/audit?eventType=bad_type`,
+    headers: { "x-admin-key": "audit-task-key" }
+  });
+  assert.equal(invalidType.statusCode, 400);
+});
+
 test("expired lease allows another node to claim same task", async (t) => {
   let now = 1_000;
   configureStoreRuntime({
