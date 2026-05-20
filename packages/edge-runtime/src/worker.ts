@@ -34,7 +34,15 @@ export const defaultDeps: EdgeRuntimeDeps = {
 };
 
 export function canProcess(input: NodeCapabilities): boolean {
-  return input.charging && input.wifi && input.idle && input.userOptIn;
+  if (!input.userOptIn || !input.wifi) {
+    return false;
+  }
+
+  if (input.nodeClass === "desktop_gpu") {
+    return Boolean(input.gpu && input.gpu.vramGb > 0);
+  }
+
+  return input.charging && input.idle;
 }
 
 export function processTask(task: SwarmTask, nodeId: string): Omit<TaskResult, "taskId" | "submittedAt"> {
@@ -62,6 +70,12 @@ export function processTask(task: SwarmTask, nodeId: string): Omit<TaskResult, "
       const simulation = mockBioSimulation(task.payload);
       score = simulation.score;
       payload = simulation;
+      break;
+    }
+    case "llm_inference": {
+      const inference = mockLlmInference(task.payload);
+      score = inference.score;
+      payload = inference;
       break;
     }
     default:
@@ -224,6 +238,43 @@ function mockBioSimulation(payload: Record<string, unknown>): Record<string, unk
       populationSize,
       modelVersion
     }
+  };
+}
+
+function mockLlmInference(payload: Record<string, unknown>): Record<string, unknown> & { score: number } {
+  const prompt = String(payload.prompt ?? "");
+  const model = String(payload.model ?? "bio-llm-mini");
+  const maxTokensRaw = Number(payload.maxTokens ?? 256);
+  const temperatureRaw = Number(payload.temperature ?? 0.4);
+  const maxTokens = Number.isFinite(maxTokensRaw) ? Math.min(4096, Math.max(16, Math.floor(maxTokensRaw))) : 256;
+  const temperature = Number.isFinite(temperatureRaw) ? Math.min(2, Math.max(0, temperatureRaw)) : 0.4;
+
+  const throughput = Math.max(1, Math.round(280 - temperature * 60));
+  const outputTokens = Math.min(maxTokens, Math.max(24, Math.round(prompt.length * 0.8 + 32)));
+  const generatedText =
+    "[mock-llm] model=" +
+    model +
+    " tokens=" +
+    outputTokens +
+    " temp=" +
+    temperature.toFixed(2) +
+    " | response: decentralized biomedical reasoning complete.";
+
+  const quality = Math.min(0.98, 0.55 + Math.min(prompt.length, 800) / 2000 + (1 - Math.min(temperature, 1)) * 0.2);
+
+  return {
+    score: quality,
+    model,
+    usage: {
+      promptTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+      outputTokens,
+      totalTokens: Math.max(1, Math.ceil(prompt.length / 4)) + outputTokens
+    },
+    runtime: {
+      throughputTokensPerSecond: throughput,
+      latencyMs: Math.round((outputTokens / throughput) * 1000)
+    },
+    completion: generatedText
   };
 }
 

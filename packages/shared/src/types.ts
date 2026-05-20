@@ -3,7 +3,14 @@ export type TaskKind =
   | "embedding_generate"
   | "bio_prescreen"
   | "hypothesis_rank"
-  | "bio_simulation";
+  | "bio_simulation"
+  | "llm_inference";
+
+export interface NodeGpuInfo {
+  vendor: string;
+  model: string;
+  vramGb: number;
+}
 
 export interface SwarmTask {
   id: string;
@@ -24,6 +31,8 @@ export interface NodeCapabilities {
   wifi: boolean;
   idle: boolean;
   userOptIn: boolean;
+  nodeClass?: "mobile" | "desktop_gpu";
+  gpu?: NodeGpuInfo;
 }
 
 export interface TaskResult {

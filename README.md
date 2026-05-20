@@ -184,6 +184,10 @@ Orchestrator:
 Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)
 - `NODE_ID` (default random `node-xxxxxxxx`)
+- `EDGE_PROFILE` (`mobile` default, `desktop-gpu` enables desktop GPU capability mode)
+- `EDGE_GPU_VENDOR` (used when `EDGE_PROFILE=desktop-gpu`)
+- `EDGE_GPU_MODEL` (used when `EDGE_PROFILE=desktop-gpu`)
+- `EDGE_GPU_VRAM_GB` (used when `EDGE_PROFILE=desktop-gpu`, default `8`)
 
 ## Next Milestones
 

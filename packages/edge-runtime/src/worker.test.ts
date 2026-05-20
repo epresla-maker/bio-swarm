@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SwarmTask } from "@bio-swarm/shared";
-import { claimTask, processTask, sendHeartbeat, submitResult, type EdgeRuntimeConfig, type EdgeRuntimeDeps } from "./worker.js";
+import {
+  canProcess,
+  claimTask,
+  processTask,
+  sendHeartbeat,
+  submitResult,
+  type EdgeRuntimeConfig,
+  type EdgeRuntimeDeps
+} from "./worker.js";
 
 function createConfig(): EdgeRuntimeConfig {
   return {
@@ -47,6 +55,58 @@ test("processTask returns deterministic structure", () => {
   assert.equal(first.nodeId, "node-1");
   assert.equal(first.score, second.score);
   assert.equal(first.checksum, second.checksum);
+});
+
+test("processTask handles llm_inference payload", () => {
+  const task: SwarmTask = {
+    id: "t-llm-1",
+    kind: "llm_inference",
+    payload: {
+      prompt: "Summarize distributed biomedical inference in one paragraph.",
+      model: "bio-llm-v2",
+      maxTokens: 200,
+      temperature: 0.2
+    },
+    createdAt: new Date().toISOString(),
+    quorum: 1
+  };
+
+  const result = processTask(task, "node-gpu-1");
+  assert.equal(result.nodeId, "node-gpu-1");
+  assert.equal(typeof result.payload.completion, "string");
+  assert.equal(typeof result.payload.usage, "object");
+  assert.equal(typeof result.score, "number");
+  assert.ok(result.score >= 0);
+  assert.ok(result.score <= 1);
+});
+
+test("canProcess allows desktop_gpu nodes with GPU info", () => {
+  assert.equal(
+    canProcess({
+      charging: false,
+      wifi: true,
+      idle: false,
+      userOptIn: true,
+      nodeClass: "desktop_gpu",
+      gpu: {
+        vendor: "nvidia",
+        model: "rtx-4090",
+        vramGb: 24
+      }
+    }),
+    true
+  );
+
+  assert.equal(
+    canProcess({
+      charging: true,
+      wifi: true,
+      idle: true,
+      userOptIn: true,
+      nodeClass: "desktop_gpu"
+    }),
+    false
+  );
 });
 
 test("claimTask returns null on network error", async () => {
