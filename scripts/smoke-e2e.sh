@@ -97,9 +97,12 @@ NODE_ACTIVE="$(echo "${NODE_SNAPSHOT}" | node -e 'let b="";process.stdin.on("dat
 NODE_AUDIT="$(curl -fsS "${ORCHESTRATOR_URL}/nodes/${SMOKE_NODE_ID}/audit?limit=10" -H "x-admin-key: ${ADMIN_API_KEY}")"
 NODE_AUDIT_COUNT="$(echo "${NODE_AUDIT}" | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const j=JSON.parse(b);process.stdout.write(String((j.items ?? []).length))});')"
 
-if [[ "${COMPLETED}" -lt 1 || "${ACCEPTED}" -lt 1 || "${HEARTBEATS}" -lt 1 || "${TASK_STATE}" != "completed" || "${TASK_RESULT_COUNT}" -lt 1 || "${TASK_VERDICT_COUNT}" -lt 1 || "${TASK_AUDIT_COUNT}" -lt 3 || "${NODE_ACTIVE}" != "true" || "${NODE_AUDIT_COUNT}" -lt 2 ]]; then
+ADMIN_DASHBOARD="$(curl -fsS "${ORCHESTRATOR_URL}/admin/dashboard" -H "x-admin-key: ${ADMIN_API_KEY}")"
+DASHBOARD_HAS_TASKS="$(echo "${ADMIN_DASHBOARD}" | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const j=JSON.parse(b);process.stdout.write(String(typeof j.tasks?.total === "number" && Array.isArray(j.recentAudit) && Array.isArray(j.attentionTasks) && Array.isArray(j.attentionNodes)))})')"
+
+if [[ "${COMPLETED}" -lt 1 || "${ACCEPTED}" -lt 1 || "${HEARTBEATS}" -lt 1 || "${TASK_STATE}" != "completed" || "${TASK_RESULT_COUNT}" -lt 1 || "${TASK_VERDICT_COUNT}" -lt 1 || "${TASK_AUDIT_COUNT}" -lt 3 || "${NODE_ACTIVE}" != "true" || "${NODE_AUDIT_COUNT}" -lt 2 || "${DASHBOARD_HAS_TASKS}" != "true" ]]; then
   echo "[smoke] verification failed"
-  echo "telemetry.completed=${COMPLETED} task.state=${TASK_STATE} task.results=${TASK_RESULT_COUNT} task.verdicts=${TASK_VERDICT_COUNT} task.audit=${TASK_AUDIT_COUNT} node.accepted=${ACCEPTED} node.heartbeats=${HEARTBEATS} node.active=${NODE_ACTIVE} node.audit=${NODE_AUDIT_COUNT}"
+  echo "telemetry.completed=${COMPLETED} task.state=${TASK_STATE} task.results=${TASK_RESULT_COUNT} task.verdicts=${TASK_VERDICT_COUNT} task.audit=${TASK_AUDIT_COUNT} node.accepted=${ACCEPTED} node.heartbeats=${HEARTBEATS} node.active=${NODE_ACTIVE} node.audit=${NODE_AUDIT_COUNT} dashboard.ok=${DASHBOARD_HAS_TASKS}"
   echo "--- orchestrator log ---"
   cat "${ORCH_LOG}" || true
   echo "--- edge log ---"
@@ -107,4 +110,4 @@ if [[ "${COMPLETED}" -lt 1 || "${ACCEPTED}" -lt 1 || "${HEARTBEATS}" -lt 1 || "$
   exit 1
 fi
 
-echo "[smoke] ok: completed=${COMPLETED}, taskState=${TASK_STATE}, accepted=${ACCEPTED}, heartbeats=${HEARTBEATS}, taskAudit=${TASK_AUDIT_COUNT}, nodeAudit=${NODE_AUDIT_COUNT}"
+echo "[smoke] ok: completed=${COMPLETED}, taskState=${TASK_STATE}, accepted=${ACCEPTED}, heartbeats=${HEARTBEATS}, taskAudit=${TASK_AUDIT_COUNT}, nodeAudit=${NODE_AUDIT_COUNT}, dashboard=${DASHBOARD_HAS_TASKS}"

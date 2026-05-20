@@ -140,6 +140,27 @@ export interface NodeStatusSummary {
   quarantined: number;
 }
 
+export interface AdminDashboardTaskItem {
+  snapshot: TaskSnapshot;
+  reason: "failed" | "leased" | "retried_pending";
+}
+
+export interface AdminDashboardNodeItem {
+  snapshot: NodeListItem;
+  reason: "disabled" | "quarantined" | "inactive" | "high_rejection_rate";
+}
+
+export interface AdminDashboardSnapshot {
+  generatedAt: string;
+  tasks: TaskStatusSummary;
+  nodes: NodeStatusSummary;
+  attentionTasks: AdminDashboardTaskItem[];
+  attentionNodes: AdminDashboardNodeItem[];
+  recentVerdicts: TaskVerdictLogEntry[];
+  recentAudit: AuditLogEntry[];
+  auditPersistence: AuditPersistenceStatus;
+}
+
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
@@ -258,6 +279,83 @@ export function getAuditPersistenceStatus(): AuditPersistenceStatus {
     lastLoadedAt: lastAuditLoadedAt,
     lastWrittenAt: lastAuditWrittenAt,
     lastError: lastAuditError
+  };
+}
+
+export function getAdminDashboardSnapshot(): AdminDashboardSnapshot {
+  sweepExpiredLeases();
+
+  const attentionTasks = Array.from(tasks.keys())
+    .map((taskId) => getTaskSnapshot(taskId))
+    .filter((snapshot): snapshot is TaskSnapshot => snapshot !== null)
+    .map((snapshot) => {
+      if (snapshot.state === "failed") {
+        return { snapshot, reason: "failed" as const, priority: 0 };
+      }
+
+      if (snapshot.state === "leased") {
+        return { snapshot, reason: "leased" as const, priority: 1 };
+      }
+
+      if (snapshot.state === "pending" && snapshot.attempts > 0) {
+        return { snapshot, reason: "retried_pending" as const, priority: 2 };
+      }
+
+      return null;
+    })
+    .filter((item): item is { snapshot: TaskSnapshot; reason: AdminDashboardTaskItem["reason"]; priority: number } => item !== null)
+    .sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+
+      return new Date(b.snapshot.task.createdAt).getTime() - new Date(a.snapshot.task.createdAt).getTime();
+    })
+    .slice(0, 8)
+    .map(({ snapshot, reason }) => ({ snapshot, reason }));
+
+  const attentionNodes = listNodeSnapshots({ limit: 200 })
+    .map((snapshot) => {
+      if (snapshot.control.mode === "disabled") {
+        return { snapshot, reason: "disabled" as const, priority: 0 };
+      }
+
+      if (snapshot.control.mode === "quarantined") {
+        return { snapshot, reason: "quarantined" as const, priority: 1 };
+      }
+
+      if (!snapshot.active) {
+        return { snapshot, reason: "inactive" as const, priority: 2 };
+      }
+
+      if (snapshot.stats.rejected >= 2 && snapshot.stats.rejected > snapshot.stats.accepted) {
+        return { snapshot, reason: "high_rejection_rate" as const, priority: 3 };
+      }
+
+      return null;
+    })
+    .filter((item): item is { snapshot: NodeListItem; reason: AdminDashboardNodeItem["reason"]; priority: number } => item !== null)
+    .sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+
+      const aTime = a.snapshot.stats.lastSeenAt ? new Date(a.snapshot.stats.lastSeenAt).getTime() : 0;
+      const bTime = b.snapshot.stats.lastSeenAt ? new Date(b.snapshot.stats.lastSeenAt).getTime() : 0;
+      return bTime - aTime;
+    })
+    .slice(0, 8)
+    .map(({ snapshot, reason }) => ({ snapshot, reason }));
+
+  return {
+    generatedAt: new Date(nowProvider()).toISOString(),
+    tasks: getTaskStatusSummary(),
+    nodes: getNodeStatusSummary(),
+    attentionTasks,
+    attentionNodes,
+    recentVerdicts: getRecentVerdicts({ limit: 5 }),
+    recentAudit: getAuditLog({ limit: 5 }),
+    auditPersistence: getAuditPersistenceStatus()
   };
 }
 

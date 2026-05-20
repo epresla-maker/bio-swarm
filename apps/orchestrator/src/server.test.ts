@@ -1165,3 +1165,80 @@ test("admin status endpoint returns audit persistence status", async (t) => {
   assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
   assert.equal(typeof authorized.json().auditPersistence.maxBytes, "number");
 });
+
+test("admin dashboard endpoint returns attention queues for operators", async (t) => {
+  let now = 80_000;
+  configureStoreRuntime({ leaseTtlMs: 120_000, nowProvider: () => now });
+  const app = buildApp({ adminApiKey: "dashboard-key", nowProvider: () => now });
+  t.after(() => app.close());
+
+  await app.inject({
+    method: "POST",
+    url: "/nodes/node-inactive/heartbeat",
+    payload: { capabilities: { charging: true, wifi: true, idle: true, userOptIn: true } }
+  });
+
+  await app.inject({
+    method: "POST",
+    url: "/nodes/node-disabled/heartbeat",
+    payload: { capabilities: { charging: true, wifi: true, idle: true, userOptIn: true } }
+  });
+  await app.inject({
+    method: "POST",
+    url: "/nodes/node-leased/heartbeat",
+    payload: { capabilities: { charging: true, wifi: true, idle: true, userOptIn: true } }
+  });
+  await app.inject({
+    method: "POST",
+    url: "/nodes/node-disabled/disable",
+    headers: { "x-admin-key": "dashboard-key" },
+    payload: { reason: "manual_hold" }
+  });
+
+  const leasedCreated = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "dashboard-key" },
+    payload: { kind: "bio_prescreen", payload: { sample: "leased" }, quorum: 1 }
+  });
+  const leasedTask = leasedCreated.json();
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-leased" });
+
+  const failedCreated = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "dashboard-key" },
+    payload: { kind: "bio_prescreen", payload: { sample: "failed" }, quorum: 1 }
+  });
+  const failedTask = failedCreated.json();
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${failedTask.id}/cancel`,
+    headers: { "x-admin-key": "dashboard-key" }
+  });
+
+  now += 61_000;
+
+  const unauthorized = await app.inject({ method: "GET", url: "/admin/dashboard" });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const authorized = await app.inject({
+    method: "GET",
+    url: "/admin/dashboard",
+    headers: { "x-admin-key": "dashboard-key" }
+  });
+
+  assert.equal(authorized.statusCode, 200);
+  assert.equal(typeof authorized.json().generatedAt, "string");
+  assert.equal(typeof authorized.json().tasks.total, "number");
+  assert.equal(typeof authorized.json().nodes.total, "number");
+  assert.ok(Array.isArray(authorized.json().attentionTasks));
+  assert.ok(Array.isArray(authorized.json().attentionNodes));
+  assert.ok(authorized.json().attentionTasks.some((item: { reason: string; snapshot: { task: { id: string } } }) => item.reason === "failed" && item.snapshot.task.id === failedTask.id));
+  assert.ok(authorized.json().attentionTasks.some((item: { reason: string; snapshot: { task: { id: string } } }) => item.reason === "leased" && item.snapshot.task.id === leasedTask.id));
+  assert.ok(authorized.json().attentionNodes.some((item: { reason: string; snapshot: { stats: { nodeId: string } } }) => item.reason === "disabled" && item.snapshot.stats.nodeId === "node-disabled"));
+  assert.ok(authorized.json().attentionNodes.some((item: { reason: string; snapshot: { stats: { nodeId: string } } }) => item.reason === "inactive" && item.snapshot.stats.nodeId === "node-inactive"));
+  assert.ok(Array.isArray(authorized.json().recentVerdicts));
+  assert.ok(Array.isArray(authorized.json().recentAudit));
+  assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
+});

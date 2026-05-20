@@ -6,6 +6,7 @@ import {
   claimTask,
   deleteTask,
   getAuditLog,
+  getAdminDashboardSnapshot,
   getAuditPersistenceStatus,
   getNodeSnapshot,
   getNodeStatusSummary,
@@ -528,6 +529,14 @@ export function buildApp(options?: {
       recentAudit: getAuditLog({ limit: 5 }),
       auditPersistence: getAuditPersistenceStatus()
     };
+  });
+
+  app.get("/admin/dashboard", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    return getAdminDashboardSnapshot();
   });
 
   app.get<{ Querystring: { limit?: string; nodeId?: string; taskId?: string; eventType?: string; since?: string; until?: string } }>(
