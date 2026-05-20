@@ -15,6 +15,7 @@ import {
   getRecentVerdicts,
   getTaskSnapshot,
   getTelemetrySnapshot,
+  requeueTask,
   recordHeartbeat,
   submitResult
 } from "./store.js";
@@ -42,6 +43,7 @@ export function buildApp(options?: {
     "task_created",
     "task_claimed",
     "task_canceled",
+    "task_requeued",
     "result_submitted",
     "result_rejected",
     "heartbeat_received",
@@ -126,6 +128,7 @@ export function buildApp(options?: {
         | "task_created"
         | "task_claimed"
         | "task_canceled"
+        | "task_requeued"
         | "result_submitted"
         | "result_rejected"
         | "heartbeat_received"
@@ -260,6 +263,20 @@ export function buildApp(options?: {
     }
 
     if (!verdict.canceled && verdict.reason === "task_already_completed") {
+      return reply.status(409).send(verdict);
+    }
+
+    return reply.status(200).send(verdict);
+  });
+
+  app.post<{ Params: { id: string } }>("/tasks/:id/requeue", async (request, reply) => {
+    const verdict = requeueTask(request.params.id);
+
+    if (!verdict.requeued && verdict.reason === "task_not_found") {
+      return reply.status(404).send(verdict);
+    }
+
+    if (!verdict.requeued) {
       return reply.status(409).send(verdict);
     }
 

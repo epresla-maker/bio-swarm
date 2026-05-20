@@ -214,6 +214,56 @@ test("canceling completed task returns conflict", async (t) => {
   assert.equal(canceled.json().reason, "task_already_completed");
 });
 
+test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
+  let now = 1_000;
+  configureStoreRuntime({ leaseTtlMs: 100, maxAttempts: 1, nowProvider: () => now });
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "requeue-1" },
+      quorum: 1
+    }
+  });
+  const task = created.json();
+
+  const claimed = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-requeue-1" });
+  assert.equal(claimed.statusCode, 200);
+
+  now += 101;
+  const noTask = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-requeue-2" });
+  assert.equal(noTask.statusCode, 204);
+
+  const failedSnapshot = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(failedSnapshot.statusCode, 200);
+  assert.equal(failedSnapshot.json().state, "failed");
+
+  const requeued = await app.inject({ method: "POST", url: `/tasks/${task.id}/requeue` });
+  assert.equal(requeued.statusCode, 200);
+  assert.equal(requeued.json().requeued, true);
+
+  const pendingSnapshot = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(pendingSnapshot.statusCode, 200);
+  assert.equal(pendingSnapshot.json().state, "pending");
+  assert.equal(pendingSnapshot.json().attempts, 0);
+  assert.equal(pendingSnapshot.json().resultCount, 0);
+
+  const reclaimed = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-requeue-3" });
+  assert.equal(reclaimed.statusCode, 200);
+  assert.equal(reclaimed.json().id, task.id);
+
+  const badState = await app.inject({ method: "POST", url: `/tasks/${task.id}/requeue` });
+  assert.equal(badState.statusCode, 409);
+  assert.equal(badState.json().reason, "task_not_failed");
+
+  const missing = await app.inject({ method: "POST", url: "/tasks/not-found/requeue" });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("GET /tasks lists and filters by state", async (t) => {
   const app = buildApp();
   t.after(() => app.close());
@@ -663,6 +713,15 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   });
   assert.equal(canceledEvents.statusCode, 200);
   assert.ok(canceledEvents.json().items.some((item: { eventType: string }) => item.eventType === "task_canceled"));
+
+  await app.inject({ method: "POST", url: `/tasks/${cancelTaskId}/requeue` });
+  const requeuedEvents = await app.inject({
+    method: "GET",
+    url: "/admin/audit?eventType=task_requeued",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(requeuedEvents.statusCode, 200);
+  assert.ok(requeuedEvents.json().items.some((item: { eventType: string }) => item.eventType === "task_requeued"));
 
   const invalidType = await app.inject({
     method: "GET",

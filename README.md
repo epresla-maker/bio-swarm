@@ -140,6 +140,7 @@ The orchestrator performs:
 - `GET /tasks/claim?nodeId=...`
 - `POST /tasks/:id/result`
 - `POST /tasks/:id/cancel`
+- `POST /tasks/:id/requeue`
 - `GET /nodes?active=true|false&limit=50`
 - `GET /nodes/:id`
 - `GET /nodes/:id/stats`
@@ -150,7 +151,7 @@ The orchestrator performs:
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 
-Audit event types include: `task_created`, `task_claimed`, `task_canceled`, `result_submitted`, `result_rejected`, `heartbeat_received`, `lease_expired`.
+Audit event types include: `task_created`, `task_claimed`, `task_canceled`, `task_requeued`, `result_submitted`, `result_rejected`, `heartbeat_received`, `lease_expired`.
 
 ## Runtime Env Vars
 
