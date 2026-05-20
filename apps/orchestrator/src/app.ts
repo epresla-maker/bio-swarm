@@ -1,6 +1,16 @@
 import Fastify from "fastify";
 import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
-import { addTask, claimTask, getAuditLog, getNodeStats, getRecentVerdicts, getTelemetrySnapshot, recordHeartbeat, submitResult } from "./store.js";
+import {
+  addTask,
+  claimTask,
+  getAuditLog,
+  getAuditPersistenceStatus,
+  getNodeStats,
+  getRecentVerdicts,
+  getTelemetrySnapshot,
+  recordHeartbeat,
+  submitResult
+} from "./store.js";
 
 interface AdminRateState {
   windowStartMs: number;
@@ -232,6 +242,16 @@ export function buildApp(options?: {
         taskId: rawTaskId,
         accepted: acceptedFilter
       })
+    };
+  });
+
+  app.get("/admin/status", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    return {
+      auditPersistence: getAuditPersistenceStatus()
     };
   });
 

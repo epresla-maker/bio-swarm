@@ -324,3 +324,20 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   });
   assert.equal(invalidFormat.statusCode, 400);
 });
+
+test("admin status endpoint returns audit persistence status", async (t) => {
+  const app = buildApp({ adminApiKey: "status-key", adminRateLimitMax: 10, adminRateLimitWindowMs: 60_000 });
+  t.after(() => app.close());
+
+  const unauthorized = await app.inject({ method: "GET", url: "/admin/status" });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const authorized = await app.inject({
+    method: "GET",
+    url: "/admin/status",
+    headers: { "x-admin-key": "status-key" }
+  });
+  assert.equal(authorized.statusCode, 200);
+  assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
+  assert.equal(typeof authorized.json().auditPersistence.maxBytes, "number");
+});

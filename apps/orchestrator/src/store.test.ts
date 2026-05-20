@@ -9,6 +9,7 @@ import {
   configureAuditLogPersistence,
   configureStoreRuntime,
   getAuditLog,
+  getAuditPersistenceStatus,
   getRecentVerdicts,
   getNodeStats,
   getTelemetrySnapshot,
@@ -223,6 +224,28 @@ test("audit log retention removes old rotated files", () => {
 
   assert.equal(fs.existsSync(oldRotated), false);
   assert.equal(fs.existsSync(recentRotated), true);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("audit persistence status reports runtime configuration", () => {
+  resetStoreForTests();
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bio-swarm-audit-status-"));
+  const file = path.join(dir, "audit.jsonl");
+
+  configureAuditLogPersistence({ filePath: file, maxBytes: 2048, maxFiles: 3, retentionDays: 7 });
+  addTask({ kind: "bio_prescreen", payload: { sample: "status" }, quorum: 1 });
+
+  const status = getAuditPersistenceStatus();
+  assert.equal(status.enabled, true);
+  assert.equal(status.path, file);
+  assert.equal(status.maxBytes, 2048);
+  assert.equal(status.maxFiles, 3);
+  assert.equal(status.retentionDays, 7);
+  assert.equal(status.fileExists, true);
+  assert.ok(status.fileSizeBytes > 0);
+  assert.equal(status.lastError, null);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

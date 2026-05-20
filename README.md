@@ -121,6 +121,7 @@ The orchestrator performs:
 - `POST /nodes/:id/heartbeat`
 - `GET /telemetry`
 - `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 

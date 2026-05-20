@@ -52,6 +52,20 @@ export interface AuditQuery {
   until?: number;
 }
 
+export interface AuditPersistenceStatus {
+  enabled: boolean;
+  path: string | null;
+  maxBytes: number;
+  maxFiles: number;
+  retentionDays: number;
+  fileExists: boolean;
+  fileSizeBytes: number;
+  rotatedFileCount: number;
+  lastLoadedAt: string | null;
+  lastWrittenAt: string | null;
+  lastError: string | null;
+}
+
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
@@ -70,6 +84,9 @@ let auditLogPath: string | null = null;
 let auditLogMaxBytes = Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000);
 let auditLogMaxFiles = Number(process.env.AUDIT_LOG_MAX_FILES ?? 5);
 let auditLogRetentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30);
+let lastAuditLoadedAt: string | null = null;
+let lastAuditWrittenAt: string | null = null;
+let lastAuditError: string | null = null;
 
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
@@ -101,6 +118,9 @@ export function resetStoreForTests(): void {
   auditLogMaxBytes = Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000);
   auditLogMaxFiles = Number(process.env.AUDIT_LOG_MAX_FILES ?? 5);
   auditLogRetentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30);
+  lastAuditLoadedAt = null;
+  lastAuditWrittenAt = null;
+  lastAuditError = null;
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   nowProvider = () => Date.now();
@@ -133,6 +153,36 @@ export function configureAuditLogPersistence(
 
   auditLogPath = filePath;
   ensureAuditLogLoadedFromDisk(filePath);
+}
+
+export function getAuditPersistenceStatus(): AuditPersistenceStatus {
+  const enabled = Boolean(auditLogPath);
+  const fileExists = enabled && auditLogPath ? fs.existsSync(auditLogPath) : false;
+  const fileSizeBytes = fileExists && auditLogPath ? fs.statSync(auditLogPath).size : 0;
+
+  let rotatedFileCount = 0;
+  if (enabled && auditLogPath) {
+    const dir = path.dirname(auditLogPath);
+    const base = path.basename(auditLogPath);
+    const rotatedPattern = new RegExp(`^${escapeRegex(base)}\\.\\d+$`);
+    if (fs.existsSync(dir)) {
+      rotatedFileCount = fs.readdirSync(dir).filter((name) => rotatedPattern.test(name)).length;
+    }
+  }
+
+  return {
+    enabled,
+    path: auditLogPath,
+    maxBytes: auditLogMaxBytes,
+    maxFiles: auditLogMaxFiles,
+    retentionDays: auditLogRetentionDays,
+    fileExists,
+    fileSizeBytes,
+    rotatedFileCount,
+    lastLoadedAt: lastAuditLoadedAt,
+    lastWrittenAt: lastAuditWrittenAt,
+    lastError: lastAuditError
+  };
 }
 
 export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
@@ -502,7 +552,10 @@ function pushAuditEvent(event: Omit<AuditLogEntry, "at">): void {
     fs.mkdirSync(path.dirname(auditLogPath), { recursive: true });
     rotateAuditLogIfNeeded(auditLogPath, Buffer.byteLength(line, "utf8"));
     fs.appendFileSync(auditLogPath, line, "utf8");
+    lastAuditWrittenAt = new Date(nowProvider()).toISOString();
+    lastAuditError = null;
   } catch {
+    lastAuditError = "audit_append_failed";
     // Persistence failures should not break API behavior in MVP mode.
   }
 }
@@ -512,6 +565,8 @@ function ensureAuditLogLoadedFromDisk(filePath: string): void {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, "", "utf8");
+      lastAuditLoadedAt = new Date(nowProvider()).toISOString();
+      lastAuditError = null;
       return;
     }
 
@@ -534,7 +589,10 @@ function ensureAuditLogLoadedFromDisk(filePath: string): void {
     if (auditLog.length > MAX_AUDIT_LOG) {
       auditLog.splice(0, auditLog.length - MAX_AUDIT_LOG);
     }
+    lastAuditLoadedAt = new Date(nowProvider()).toISOString();
+    lastAuditError = null;
   } catch {
+    lastAuditError = "audit_load_failed";
     // Ignore persistence bootstrap failures in MVP mode.
   }
 }
