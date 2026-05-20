@@ -395,6 +395,14 @@ export function renderAdminDashboardPage(): string {
 					compareLoadFailed: 'Az osszehasonlitas lekerese sikertelen.',
 					experimentLoadFailed: 'Kiserlet betoltes sikertelen: ',
 					researchListLoadFailed: 'Kutatasi lista lekerese sikertelen: ',
+					compareLabelA: 'A',
+					compareLabelB: 'B',
+					metricBestScore: 'Legjobb pontszam',
+					metricConvergence: 'Konvergencia',
+					metricStability: 'Stabilitas',
+					metricDiversity: 'Diverzitas',
+					metricMutationRate: 'Mutacios rata',
+					metricPopulation: 'Populacio',
 					enterAdminKey: 'Elobb add meg az admin API kulcsot.',
 					creatingExperiment: 'Kiserlet letrehozasa...',
 					createFailed: 'Letrehozas sikertelen: ',
@@ -450,6 +458,14 @@ export function renderAdminDashboardPage(): string {
 					compareLoadFailed: 'Failed to load comparison.',
 					experimentLoadFailed: 'Failed to load experiment: ',
 					researchListLoadFailed: 'Failed to load research list: ',
+					compareLabelA: 'A',
+					compareLabelB: 'B',
+					metricBestScore: 'Best Score',
+					metricConvergence: 'Convergence',
+					metricStability: 'Stability',
+					metricDiversity: 'Diversity',
+					metricMutationRate: 'Mutation Rate',
+					metricPopulation: 'Population',
 					enterAdminKey: 'Enter admin API key first.',
 					creatingExperiment: 'Creating experiment...',
 					createFailed: 'Create failed: ',
@@ -750,14 +766,14 @@ export function renderAdminDashboardPage(): string {
 			function getCompareRows(a, b) {
 				return [
 					{
-						metric: 'Best Score',
+						metric: t('metricBestScore'),
 						a: a.bestScore,
 						b: b.bestScore,
 						delta:
 							typeof a.bestScore === 'number' && typeof b.bestScore === 'number' ? a.bestScore - b.bestScore : null
 					},
 					{
-						metric: 'Convergence',
+						metric: t('metricConvergence'),
 						a: metric(a, 'convergence'),
 						b: metric(b, 'convergence'),
 						delta:
@@ -766,7 +782,7 @@ export function renderAdminDashboardPage(): string {
 								: null
 					},
 					{
-						metric: 'Stability',
+						metric: t('metricStability'),
 						a: metric(a, 'stability'),
 						b: metric(b, 'stability'),
 						delta:
@@ -775,7 +791,7 @@ export function renderAdminDashboardPage(): string {
 								: null
 					},
 					{
-						metric: 'Diversity',
+						metric: t('metricDiversity'),
 						a: metric(a, 'diversityIndex'),
 						b: metric(b, 'diversityIndex'),
 						delta:
@@ -784,7 +800,7 @@ export function renderAdminDashboardPage(): string {
 								: null
 					},
 					{
-						metric: 'Mutation Rate',
+						metric: t('metricMutationRate'),
 						a: a.mutationRate,
 						b: b.mutationRate,
 						delta:
@@ -793,7 +809,7 @@ export function renderAdminDashboardPage(): string {
 								: null
 					},
 					{
-						metric: 'Population',
+						metric: t('metricPopulation'),
 						a: a.populationSize,
 						b: b.populationSize,
 						delta:
@@ -895,13 +911,13 @@ export function renderAdminDashboardPage(): string {
 				};
 
 				els.compareResult.innerHTML = [
-					'<div class="mono"><strong>A:</strong> ' + a.name + ' | <strong>B:</strong> ' + b.name + '</div>',
-					renderDelta('Legjobb pontszam', a.bestScore, b.bestScore, true),
-					renderDelta('Konvergencia', metric(a, 'convergence'), metric(b, 'convergence'), true),
-					renderDelta('Stabilitas', metric(a, 'stability'), metric(b, 'stability'), true),
-					renderDelta('Diverzitas', metric(a, 'diversityIndex'), metric(b, 'diversityIndex'), true),
-					renderDelta('Mutacios rata', a.mutationRate, b.mutationRate, false),
-					renderDelta('Populacio', a.populationSize, b.populationSize, true)
+					'<div class="mono"><strong>' + t('compareLabelA') + ':</strong> ' + a.name + ' | <strong>' + t('compareLabelB') + ':</strong> ' + b.name + '</div>',
+					renderDelta(t('metricBestScore'), a.bestScore, b.bestScore, true),
+					renderDelta(t('metricConvergence'), metric(a, 'convergence'), metric(b, 'convergence'), true),
+					renderDelta(t('metricStability'), metric(a, 'stability'), metric(b, 'stability'), true),
+					renderDelta(t('metricDiversity'), metric(a, 'diversityIndex'), metric(b, 'diversityIndex'), true),
+					renderDelta(t('metricMutationRate'), a.mutationRate, b.mutationRate, false),
+					renderDelta(t('metricPopulation'), a.populationSize, b.populationSize, true)
 				].join('');
 			}
 
@@ -1091,6 +1107,9 @@ export function renderAdminDashboardPage(): string {
 				applyStaticLanguage();
 				if (els.key.value.trim()) {
 					void loadAll();
+					if (els.compareA.value && els.compareB.value) {
+						void runCompare();
+					}
 				}
 			});
 			els.refreshResearch.addEventListener("click", () => {
