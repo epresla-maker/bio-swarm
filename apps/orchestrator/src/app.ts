@@ -24,6 +24,7 @@ import {
   submitResult,
   updateNodeControl
 } from "./store.js";
+import { renderAdminDashboardPage } from "./admin-dashboard-page.js";
 
 interface AdminRateState {
   windowStartMs: number;
@@ -537,6 +538,11 @@ export function buildApp(options?: {
     }
 
     return getAdminDashboardSnapshot();
+  });
+
+  app.get("/admin/dashboard/ui", async (_request, reply) => {
+    reply.header("content-type", "text/html; charset=utf-8");
+    return reply.send(renderAdminDashboardPage());
   });
 
   app.get<{ Querystring: { limit?: string; nodeId?: string; taskId?: string; eventType?: string; since?: string; until?: string } }>(

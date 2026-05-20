@@ -157,6 +157,7 @@ The orchestrator performs:
 - `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, includes task/node summaries plus recent verdict and audit samples)
 - `GET /admin/dashboard` (requires header `x-admin-key: <ADMIN_API_KEY>`, highlights attention tasks and nodes for operators with reason-specific metrics)
+- `GET /admin/dashboard/ui` (browser UI shell for operators; enter admin key in page to fetch `/admin/dashboard`)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 

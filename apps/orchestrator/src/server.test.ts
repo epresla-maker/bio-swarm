@@ -1370,3 +1370,14 @@ test("admin dashboard endpoint returns attention queues for operators", async (t
   assert.ok(Array.isArray(authorized.json().recentAudit));
   assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
 });
+
+test("admin dashboard ui endpoint serves html shell", async (t) => {
+  const app = buildApp({ adminApiKey: "dashboard-ui-key" });
+  t.after(() => app.close());
+
+  const response = await app.inject({ method: "GET", url: "/admin/dashboard/ui" });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.headers["content-type"] ?? "", /text\/html/);
+  assert.match(response.body, /Bio Swarm Operator Console/);
+  assert.match(response.body, /\/admin\/dashboard/);
+});
