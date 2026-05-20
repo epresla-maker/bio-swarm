@@ -1355,6 +1355,17 @@ test("admin dashboard endpoint returns attention queues for operators", async (t
   assert.ok(authorized.json().attentionTasks.some((item: { reason: string; snapshot: { task: { id: string } } }) => item.reason === "leased" && item.snapshot.task.id === leasedTask.id));
   assert.ok(authorized.json().attentionNodes.some((item: { reason: string; snapshot: { stats: { nodeId: string } } }) => item.reason === "disabled" && item.snapshot.stats.nodeId === "node-disabled"));
   assert.ok(authorized.json().attentionNodes.some((item: { reason: string; snapshot: { stats: { nodeId: string } } }) => item.reason === "inactive" && item.snapshot.stats.nodeId === "node-inactive"));
+  const leasedAttention = authorized.json().attentionTasks.find((item: { reason: string; snapshot: { task: { id: string } }; details: { ageMs: number; attempts: number; resultCount: number; leaseAgeMs: number | null } }) => item.reason === "leased" && item.snapshot.task.id === leasedTask.id);
+  assert.equal(typeof leasedAttention.details.ageMs, "number");
+  assert.equal(typeof leasedAttention.details.attempts, "number");
+  assert.equal(typeof leasedAttention.details.resultCount, "number");
+  assert.equal(typeof leasedAttention.details.leaseAgeMs, "number");
+  const disabledAttention = authorized.json().attentionNodes.find((item: { reason: string; snapshot: { stats: { nodeId: string } }; details: { accepted: number; rejected: number; rejectionRate: number; lastSeenAgeMs: number | null; controlAgeMs: number | null } }) => item.reason === "disabled" && item.snapshot.stats.nodeId === "node-disabled");
+  assert.equal(typeof disabledAttention.details.accepted, "number");
+  assert.equal(typeof disabledAttention.details.rejected, "number");
+  assert.equal(typeof disabledAttention.details.rejectionRate, "number");
+  assert.equal(typeof disabledAttention.details.lastSeenAgeMs, "number");
+  assert.equal(typeof disabledAttention.details.controlAgeMs, "number");
   assert.ok(Array.isArray(authorized.json().recentVerdicts));
   assert.ok(Array.isArray(authorized.json().recentAudit));
   assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");

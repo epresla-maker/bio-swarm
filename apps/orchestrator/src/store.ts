@@ -143,11 +143,24 @@ export interface NodeStatusSummary {
 export interface AdminDashboardTaskItem {
   snapshot: TaskSnapshot;
   reason: "failed" | "leased" | "retried_pending";
+  details: {
+    ageMs: number;
+    attempts: number;
+    resultCount: number;
+    leaseAgeMs: number | null;
+  };
 }
 
 export interface AdminDashboardNodeItem {
   snapshot: NodeListItem;
   reason: "disabled" | "quarantined" | "inactive" | "high_rejection_rate";
+  details: {
+    accepted: number;
+    rejected: number;
+    rejectionRate: number;
+    lastSeenAgeMs: number | null;
+    controlAgeMs: number | null;
+  };
 }
 
 export interface AdminDashboardSnapshot {
@@ -306,6 +319,7 @@ export function getAuditPersistenceStatus(): AuditPersistenceStatus {
 
 export function getAdminDashboardSnapshot(): AdminDashboardSnapshot {
   sweepExpiredLeases();
+  const now = nowProvider();
 
   const attentionTasks = Array.from(tasks.keys())
     .map((taskId) => getTaskSnapshot(taskId))
@@ -334,7 +348,19 @@ export function getAdminDashboardSnapshot(): AdminDashboardSnapshot {
       return new Date(b.snapshot.task.createdAt).getTime() - new Date(a.snapshot.task.createdAt).getTime();
     })
     .slice(0, 8)
-    .map(({ snapshot, reason }) => ({ snapshot, reason }));
+    .map(({ snapshot, reason }) => ({
+      snapshot,
+      reason,
+      details: {
+        ageMs: Math.max(0, now - new Date(snapshot.task.createdAt).getTime()),
+        attempts: snapshot.attempts,
+        resultCount: snapshot.resultCount,
+        leaseAgeMs:
+          snapshot.state === "leased" && snapshot.leaseExpiresAt
+            ? Math.max(0, leaseTtlMs - Math.max(0, new Date(snapshot.leaseExpiresAt).getTime() - now))
+            : null
+      }
+    }));
 
   const attentionNodes = listNodeSnapshots({ limit: 200 })
     .map((snapshot) => {
@@ -367,7 +393,20 @@ export function getAdminDashboardSnapshot(): AdminDashboardSnapshot {
       return bTime - aTime;
     })
     .slice(0, 8)
-    .map(({ snapshot, reason }) => ({ snapshot, reason }));
+    .map(({ snapshot, reason }) => ({
+      snapshot,
+      reason,
+      details: {
+        accepted: snapshot.stats.accepted,
+        rejected: snapshot.stats.rejected,
+        rejectionRate:
+          snapshot.stats.accepted + snapshot.stats.rejected > 0
+            ? snapshot.stats.rejected / (snapshot.stats.accepted + snapshot.stats.rejected)
+            : 0,
+        lastSeenAgeMs: snapshot.stats.lastSeenAt ? Math.max(0, now - new Date(snapshot.stats.lastSeenAt).getTime()) : null,
+        controlAgeMs: snapshot.control.changedAt ? Math.max(0, now - new Date(snapshot.control.changedAt).getTime()) : null
+      }
+    }));
 
   return {
     generatedAt: new Date(nowProvider()).toISOString(),
