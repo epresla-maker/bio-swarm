@@ -37,6 +37,13 @@ export interface NodeListQuery {
   activeOnly?: boolean;
 }
 
+export interface NodeListItem {
+  stats: NodeStats;
+  capabilities: NodeCapabilities | null;
+  active: boolean;
+  control: NodeControlState;
+}
+
 export interface NodeSnapshot {
   stats: NodeStats;
   capabilities: NodeCapabilities | null;
@@ -723,6 +730,17 @@ export function listNodeStats(query: NodeListQuery): NodeStats[] {
   });
 
   return items.slice(0, bounded);
+}
+
+export function listNodeSnapshots(query: NodeListQuery): NodeListItem[] {
+  const items = listNodeStats(query);
+
+  return items.map((stats) => ({
+    stats,
+    capabilities: nodeCapabilities.get(stats.nodeId) ?? null,
+    active: isNodeActive(stats),
+    control: getNodeControlState(stats.nodeId)
+  }));
 }
 
 export function getNodeSnapshot(nodeId: string): NodeSnapshot | null {

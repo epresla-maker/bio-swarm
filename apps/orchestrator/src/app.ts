@@ -12,7 +12,7 @@ import {
   getTaskVerdicts,
   getTaskStatusSummary,
   listTaskResults,
-  listNodeStats,
+  listNodeSnapshots,
   listTaskSnapshots,
   getNodeStats,
   getRecentVerdicts,
@@ -371,7 +371,7 @@ export function buildApp(options?: {
       }
     }
 
-    const items = listNodeStats({ limit: parsedLimit, activeOnly });
+    const items = listNodeSnapshots({ limit: parsedLimit, activeOnly });
     return reply.status(200).send({ items });
   });
 

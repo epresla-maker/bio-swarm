@@ -46,11 +46,19 @@ test("heartbeat updates node stats and telemetry", async (t) => {
 test("GET /nodes lists and filters active nodes", async (t) => {
   let now = 10_000;
   configureStoreRuntime({ nowProvider: () => now });
-  const app = buildApp({ nowProvider: () => now });
+  const app = buildApp({ adminApiKey: "node-list-key", nowProvider: () => now });
   t.after(() => app.close());
 
   const hb1 = await app.inject({ method: "POST", url: "/nodes/node-a/heartbeat", payload: {} });
   assert.equal(hb1.statusCode, 200);
+
+  const disabled = await app.inject({
+    method: "POST",
+    url: "/nodes/node-a/disable",
+    headers: { "x-admin-key": "node-list-key" },
+    payload: { reason: "manual_hold" }
+  });
+  assert.equal(disabled.statusCode, 200);
 
   now += 61_000;
   const hb2 = await app.inject({ method: "POST", url: "/nodes/node-b/heartbeat", payload: {} });
@@ -59,11 +67,16 @@ test("GET /nodes lists and filters active nodes", async (t) => {
   const all = await app.inject({ method: "GET", url: "/nodes?limit=10" });
   assert.equal(all.statusCode, 200);
   assert.equal(all.json().items.length, 2);
+  assert.equal(all.json().items[0].stats.nodeId, "node-b");
+  assert.equal(all.json().items[0].control.mode, "enabled");
+  assert.equal(all.json().items[1].stats.nodeId, "node-a");
+  assert.equal(all.json().items[1].control.mode, "disabled");
 
   const activeOnly = await app.inject({ method: "GET", url: "/nodes?active=true&limit=10" });
   assert.equal(activeOnly.statusCode, 200);
   assert.equal(activeOnly.json().items.length, 1);
-  assert.equal(activeOnly.json().items[0].nodeId, "node-b");
+  assert.equal(activeOnly.json().items[0].stats.nodeId, "node-b");
+  assert.equal(activeOnly.json().items[0].active, true);
 
   const includeInactive = await app.inject({ method: "GET", url: "/nodes?active=false&limit=10" });
   assert.equal(includeInactive.statusCode, 200);

@@ -145,7 +145,7 @@ The orchestrator performs:
 - `POST /tasks/:id/cancel` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `POST /tasks/:id/requeue` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `DELETE /tasks/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`)
-- `GET /nodes?active=true|false&limit=50`
+- `GET /nodes?active=true|false&limit=50` (returns node stats, capabilities, activity flag, and control state)
 - `GET /nodes/:id`
 - `GET /nodes/:id/audit?limit=50&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /nodes/:id/stats`
