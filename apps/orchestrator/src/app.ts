@@ -2,9 +2,25 @@ import Fastify from "fastify";
 import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
 import { addTask, claimTask, getNodeStats, getRecentVerdicts, getTelemetrySnapshot, recordHeartbeat, submitResult } from "./store.js";
 
-export function buildApp(options?: { logger?: boolean; adminApiKey?: string }) {
+interface AdminRateState {
+  windowStartMs: number;
+  count: number;
+}
+
+export function buildApp(options?: {
+  logger?: boolean;
+  adminApiKey?: string;
+  adminRateLimitMax?: number;
+  adminRateLimitWindowMs?: number;
+  nowProvider?: () => number;
+}) {
   const app = Fastify({ logger: options?.logger ?? false });
   const adminApiKey = options?.adminApiKey ?? process.env.ADMIN_API_KEY ?? "";
+  const adminRateLimitMax = options?.adminRateLimitMax ?? Number(process.env.ADMIN_RATE_LIMIT_MAX ?? 60);
+  const adminRateLimitWindowMs =
+    options?.adminRateLimitWindowMs ?? Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS ?? 60_000);
+  const nowProvider = options?.nowProvider ?? (() => Date.now());
+  const adminRateMap = new Map<string, AdminRateState>();
 
   app.get("/health", async () => {
     return { ok: true };
@@ -98,6 +114,19 @@ export function buildApp(options?: { logger?: boolean; adminApiKey?: string }) {
     const providedKey = request.headers["x-admin-key"];
     if (providedKey !== adminApiKey) {
       return reply.status(401).send({ error: "unauthorized" });
+    }
+
+    const forwarded = request.headers["x-forwarded-for"];
+    const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const clientIp = forwardedValue ?? request.ip;
+    const now = nowProvider();
+    const existing = adminRateMap.get(clientIp);
+    if (!existing || now - existing.windowStartMs >= adminRateLimitWindowMs) {
+      adminRateMap.set(clientIp, { windowStartMs: now, count: 1 });
+    } else if (existing.count >= adminRateLimitMax) {
+      return reply.status(429).send({ error: "admin_rate_limited" });
+    } else {
+      existing.count += 1;
     }
 
     const rawLimit = request.query.limit;

@@ -125,7 +125,8 @@ The orchestrator performs:
 ## Runtime Env Vars
 
 Orchestrator:
-- `ADMIN_API_KEY` (required for `/admin/*` endpoints)
+- `ADMIN_RATE_LIMIT_MAX` (default `60` requests/window per IP)
+- `ADMIN_RATE_LIMIT_WINDOW_MS` (default `60000`)
 
 Edge runtime:
 

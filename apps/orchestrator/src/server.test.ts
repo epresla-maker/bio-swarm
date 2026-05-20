@@ -121,7 +121,13 @@ test("expired lease allows another node to claim same task", async (t) => {
 });
 
 test("admin verdicts endpoint returns recent verdict entries", async (t) => {
-  const app = buildApp({ adminApiKey: "test-admin-key" });
+  let now = 1000;
+  const app = buildApp({
+    adminApiKey: "test-admin-key",
+    adminRateLimitMax: 2,
+    adminRateLimitWindowMs: 1000,
+    nowProvider: () => now
+  });
   t.after(() => app.close());
 
   const created = await app.inject({
@@ -172,6 +178,7 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   assert.equal(items[0].accepted, false);
   assert.equal(items[1].accepted, true);
 
+  now += 1001;
   const acceptedOnly = await app.inject({
     method: "GET",
     url: "/admin/verdicts?accepted=true&limit=10",
@@ -181,6 +188,7 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   assert.equal(acceptedOnly.json().items.length, 1);
   assert.equal(acceptedOnly.json().items[0].accepted, true);
 
+  now += 1001;
   const byTask = await app.inject({
     method: "GET",
     url: `/admin/verdicts?taskId=${task.id}&limit=10`,
@@ -189,6 +197,7 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   assert.equal(byTask.statusCode, 200);
   assert.equal(byTask.json().items.length, 2);
 
+  now += 1001;
   const invalidAccepted = await app.inject({
     method: "GET",
     url: "/admin/verdicts?accepted=maybe",
@@ -196,6 +205,37 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   });
   assert.equal(invalidAccepted.statusCode, 400);
 
+  now += 1001;
   const unauthorized = await app.inject({ method: "GET", url: "/admin/verdicts?limit=2" });
   assert.equal(unauthorized.statusCode, 401);
+
+  now += 1001;
+  const limitedApp = buildApp({
+    adminApiKey: "limit-key",
+    adminRateLimitMax: 2,
+    adminRateLimitWindowMs: 60_000,
+    nowProvider: () => 5000
+  });
+  t.after(() => limitedApp.close());
+
+  const first = await limitedApp.inject({
+    method: "GET",
+    url: "/admin/verdicts",
+    headers: { "x-admin-key": "limit-key", "x-forwarded-for": "10.1.1.10" }
+  });
+  assert.equal(first.statusCode, 200);
+
+  const second = await limitedApp.inject({
+    method: "GET",
+    url: "/admin/verdicts",
+    headers: { "x-admin-key": "limit-key", "x-forwarded-for": "10.1.1.10" }
+  });
+  assert.equal(second.statusCode, 200);
+
+  const third = await limitedApp.inject({
+    method: "GET",
+    url: "/admin/verdicts",
+    headers: { "x-admin-key": "limit-key", "x-forwarded-for": "10.1.1.10" }
+  });
+  assert.equal(third.statusCode, 429);
 });
