@@ -37,6 +37,8 @@ Phones execute only lightweight work units such as:
 - hypothesis ranking
 - biomedical data preprocessing
 
+Desktop GPU nodes handle heavier task-level inference units such as `llm_inference`.
+
 Execution is allowed when policy permits:
 
 - charging

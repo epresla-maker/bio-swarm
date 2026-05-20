@@ -64,6 +64,49 @@ test("task is marked failed after max attempts are exhausted", () => {
   assert.equal(telemetry.queue.expiredLeases, 2);
 });
 
+test("llm_inference tasks are claimed only by desktop_gpu nodes", () => {
+  resetStoreForTests();
+
+  const llmTask = addTask({
+    kind: "llm_inference",
+    payload: { prompt: "Summarize this" },
+    quorum: 1
+  });
+  const generalTask = addTask({ kind: "bio_prescreen", payload: { sample: "fallback" }, quorum: 1 });
+
+  recordHeartbeat("node-mobile", {
+    charging: true,
+    wifi: true,
+    idle: true,
+    userOptIn: true,
+    nodeClass: "mobile"
+  });
+
+  const mobileClaim = claimTask("node-mobile");
+  assert.equal(mobileClaim?.id, generalTask.id);
+  assert.equal(mobileClaim?.kind, "bio_prescreen");
+
+  const mobileClaimAgain = claimTask("node-mobile");
+  assert.equal(mobileClaimAgain, null);
+
+  recordHeartbeat("node-gpu", {
+    charging: true,
+    wifi: true,
+    idle: true,
+    userOptIn: true,
+    nodeClass: "desktop_gpu",
+    gpu: {
+      vendor: "nvidia",
+      model: "rtx-4090",
+      vramGb: 24
+    }
+  });
+
+  const gpuClaim = claimTask("node-gpu");
+  assert.equal(gpuClaim?.id, llmTask.id);
+  assert.equal(gpuClaim?.kind, "llm_inference");
+});
+
 test("heartbeat updates node stats and active node count", () => {
   let now = 20_000;
   resetStoreForTests();

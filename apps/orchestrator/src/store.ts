@@ -460,6 +460,10 @@ export function claimTask(nodeId: string): SwarmTask | null {
       continue;
     }
 
+    if (!canNodeClaimTask(nodeId, record.task)) {
+      continue;
+    }
+
     if (record.leaseOwner) {
       continue;
     }
@@ -494,6 +498,19 @@ export function claimTask(nodeId: string): SwarmTask | null {
   }
 
   return null;
+}
+
+function canNodeClaimTask(nodeId: string, task: SwarmTask): boolean {
+  if (task.kind !== "llm_inference") {
+    return true;
+  }
+
+  const capabilities = nodeCapabilities.get(nodeId);
+  if (!capabilities || capabilities.nodeClass !== "desktop_gpu" || !capabilities.gpu) {
+    return false;
+  }
+
+  return typeof capabilities.gpu.vramGb === "number" && Number.isFinite(capabilities.gpu.vramGb) && capabilities.gpu.vramGb > 0;
 }
 
 export function submitResult(result: TaskResult): { accepted: boolean; reason?: string } {

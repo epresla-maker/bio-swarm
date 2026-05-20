@@ -198,6 +198,80 @@ test("node operator controls block claims until re-enabled", async (t) => {
   assert.ok(audit.json().items.some((item: { eventType: string }) => item.eventType === "node_enabled"));
 });
 
+test("llm_inference claim routing prefers desktop_gpu nodes", async (t) => {
+  const app = buildApp({ adminApiKey: "gpu-routing-key" });
+  t.after(() => app.close());
+
+  const mobileHeartbeat = await app.inject({
+    method: "POST",
+    url: "/nodes/node-mobile/heartbeat",
+    payload: {
+      capabilities: {
+        charging: true,
+        wifi: true,
+        idle: true,
+        userOptIn: true,
+        nodeClass: "mobile"
+      }
+    }
+  });
+  assert.equal(mobileHeartbeat.statusCode, 200);
+
+  const desktopHeartbeat = await app.inject({
+    method: "POST",
+    url: "/nodes/node-desktop/heartbeat",
+    payload: {
+      capabilities: {
+        charging: true,
+        wifi: true,
+        idle: true,
+        userOptIn: true,
+        nodeClass: "desktop_gpu",
+        gpu: {
+          vendor: "nvidia",
+          model: "rtx-4090",
+          vramGb: 24
+        }
+      }
+    }
+  });
+  assert.equal(desktopHeartbeat.statusCode, 200);
+
+  const llmCreated = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "gpu-routing-key" },
+    payload: {
+      kind: "llm_inference",
+      payload: { prompt: "Summarize the sample" },
+      quorum: 1
+    }
+  });
+  assert.equal(llmCreated.statusCode, 201);
+
+  const normalCreated = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "gpu-routing-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "route-fallback" },
+      quorum: 1
+    }
+  });
+  assert.equal(normalCreated.statusCode, 201);
+
+  const mobileClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-mobile" });
+  assert.equal(mobileClaim.statusCode, 200);
+  assert.equal(mobileClaim.json().kind, "bio_prescreen");
+  assert.equal(mobileClaim.json().id, normalCreated.json().id);
+
+  const desktopClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-desktop" });
+  assert.equal(desktopClaim.statusCode, 200);
+  assert.equal(desktopClaim.json().kind, "llm_inference");
+  assert.equal(desktopClaim.json().id, llmCreated.json().id);
+});
+
 test("node is automatically quarantined after repeated rejected results", async (t) => {
   configureStoreRuntime({ autoQuarantineMinRejected: 3 });
   const app = buildApp({ adminApiKey: "auto-quarantine-key" });
