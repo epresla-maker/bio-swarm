@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 PORT="${PORT:-4000}"
 ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:${PORT}}"
 NODE_ID="${NODE_ID:-dev-node-1}"
+ADMIN_API_KEY="${ADMIN_API_KEY:-dev-admin-key}"
 
 ORCH_PID=""
 EDGE_PID=""
@@ -22,7 +23,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "[dev-stack] starting orchestrator on :${PORT}"
-PORT="${PORT}" pnpm --filter @bio-swarm/orchestrator dev &
+PORT="${PORT}" ADMIN_API_KEY="${ADMIN_API_KEY}" pnpm --filter @bio-swarm/orchestrator dev &
 ORCH_PID=$!
 
 for _ in $(seq 1 80); do
@@ -42,5 +43,6 @@ ORCHESTRATOR_URL="${ORCHESTRATOR_URL}" NODE_ID="${NODE_ID}" pnpm --filter @bio-s
 EDGE_PID=$!
 
 echo "[dev-stack] services running. Press Ctrl+C to stop."
+echo "[dev-stack] admin dashboard key: ${ADMIN_API_KEY}"
 
 wait "$ORCH_PID" "$EDGE_PID"
