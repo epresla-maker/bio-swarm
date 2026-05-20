@@ -86,6 +86,18 @@ export function renderAdminDashboardPage(): string {
 				cursor: pointer;
 			}
 
+			.toggle {
+				display: inline-flex;
+				align-items: center;
+				gap: 8px;
+				padding: 10px 12px;
+				border-radius: 12px;
+				border: 1px solid rgba(255, 255, 255, 0.25);
+				background: rgba(8, 22, 35, 0.45);
+				color: #eaf5ff;
+				font-size: 0.9rem;
+			}
+
 			.grid {
 				display: grid;
 				grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -176,6 +188,7 @@ export function renderAdminDashboardPage(): string {
 				</div>
 				<div class="controls">
 					<input id="key" class="input" type="password" placeholder="Admin API key" />
+					<label class="toggle"><input id="autoRefresh" type="checkbox" checked /> Auto 5s</label>
 					<button id="refresh" class="button" type="button">Refresh</button>
 				</div>
 			</section>
@@ -213,6 +226,7 @@ export function renderAdminDashboardPage(): string {
 		<script>
 			const els = {
 				key: document.getElementById("key"),
+				autoRefresh: document.getElementById("autoRefresh"),
 				refresh: document.getElementById("refresh"),
 				status: document.getElementById("status"),
 				taskSummary: document.getElementById("taskSummary"),
@@ -221,6 +235,8 @@ export function renderAdminDashboardPage(): string {
 				attentionNodes: document.getElementById("attentionNodes"),
 				recentAudit: document.getElementById("recentAudit")
 			};
+
+			let autoRefreshTimer = null;
 
 			function row(label, value, badgeClass) {
 				const badge = badgeClass ? '<span class="badge ' + badgeClass + '">' + value + '</span>' : String(value);
@@ -297,6 +313,8 @@ export function renderAdminDashboardPage(): string {
 					return;
 				}
 
+				localStorage.setItem("bioSwarmAdminKey", key);
+
 				els.status.textContent = "Loading dashboard...";
 
 				try {
@@ -320,12 +338,46 @@ export function renderAdminDashboardPage(): string {
 				}
 			}
 
+			function syncAutoRefresh() {
+				if (autoRefreshTimer !== null) {
+					clearInterval(autoRefreshTimer);
+					autoRefreshTimer = null;
+				}
+
+				if (!els.autoRefresh.checked) {
+					localStorage.setItem("bioSwarmAutoRefresh", "off");
+					return;
+				}
+
+				localStorage.setItem("bioSwarmAutoRefresh", "on");
+				autoRefreshTimer = setInterval(() => {
+					if (els.key.value.trim()) {
+						loadDashboard();
+					}
+				}, 5000);
+			}
+
+			const rememberedKey = localStorage.getItem("bioSwarmAdminKey");
+			if (rememberedKey) {
+				els.key.value = rememberedKey;
+			}
+
+			if (localStorage.getItem("bioSwarmAutoRefresh") === "off") {
+				els.autoRefresh.checked = false;
+			}
+
 			els.refresh.addEventListener("click", loadDashboard);
+			els.autoRefresh.addEventListener("change", syncAutoRefresh);
 			els.key.addEventListener("keydown", (event) => {
 				if (event.key === "Enter") {
 					loadDashboard();
 				}
 			});
+
+			syncAutoRefresh();
+			if (els.key.value.trim()) {
+				loadDashboard();
+			}
 		</script>
 	</body>
 </html>`;
