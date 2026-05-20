@@ -104,6 +104,20 @@ export interface AuditPersistenceStatus {
   lastError: string | null;
 }
 
+export interface TaskStatusSummary {
+  total: number;
+  pending: number;
+  leased: number;
+  completed: number;
+  failed: number;
+}
+
+export interface NodeStatusSummary {
+  total: number;
+  active: number;
+  inactive: number;
+}
+
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
@@ -540,6 +554,28 @@ export function recordHeartbeat(nodeId: string, capabilities?: NodeCapabilities)
 export function getTelemetrySnapshot(): TelemetrySnapshot {
   sweepExpiredLeases();
 
+  const taskSummary = getTaskStatusSummary();
+  const nodeSummary = getNodeStatusSummary();
+
+  return {
+    generatedAt: new Date(nowProvider()).toISOString(),
+    queue: {
+      total: tasks.size,
+      pending: taskSummary.pending,
+      leased: taskSummary.leased,
+      completed: taskSummary.completed,
+      failed: taskSummary.failed,
+      retries: retryCount,
+      expiredLeases: expiredLeaseCount
+    },
+    activeNodesLast60s: nodeSummary.active,
+    totalNodes: nodeSummary.total
+  };
+}
+
+export function getTaskStatusSummary(): TaskStatusSummary {
+  sweepExpiredLeases();
+
   let pending = 0;
   let leased = 0;
   let completed = 0;
@@ -563,27 +599,28 @@ export function getTelemetrySnapshot(): TelemetrySnapshot {
     }
   }
 
-  const now = nowProvider();
-  const activeNodesLast60s = Array.from(nodeStats.values()).filter((stats) => {
-    if (!stats.lastSeenAt) {
-      return false;
+  return {
+    total: tasks.size,
+    pending,
+    leased,
+    completed,
+    failed
+  };
+}
+
+export function getNodeStatusSummary(): NodeStatusSummary {
+  let active = 0;
+
+  for (const stats of nodeStats.values()) {
+    if (isNodeActive(stats)) {
+      active += 1;
     }
-    return now - new Date(stats.lastSeenAt).getTime() <= 60_000;
-  }).length;
+  }
 
   return {
-    generatedAt: new Date(nowProvider()).toISOString(),
-    queue: {
-      total: tasks.size,
-      pending,
-      leased,
-      completed,
-      failed,
-      retries: retryCount,
-      expiredLeases: expiredLeaseCount
-    },
-    activeNodesLast60s,
-    totalNodes: nodeStats.size
+    total: nodeStats.size,
+    active,
+    inactive: Math.max(0, nodeStats.size - active)
   };
 }
 

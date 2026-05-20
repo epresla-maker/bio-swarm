@@ -8,7 +8,9 @@ import {
   getAuditLog,
   getAuditPersistenceStatus,
   getNodeSnapshot,
+  getNodeStatusSummary,
   getTaskVerdicts,
+  getTaskStatusSummary,
   listTaskResults,
   listNodeStats,
   listTaskSnapshots,
@@ -474,6 +476,8 @@ export function buildApp(options?: {
     }
 
     return {
+      tasks: getTaskStatusSummary(),
+      nodes: getNodeStatusSummary(),
       auditPersistence: getAuditPersistenceStatus()
     };
   });

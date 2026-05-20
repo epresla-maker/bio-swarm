@@ -1024,8 +1024,36 @@ test("admin audit endpoint supports filters and validation", async (t) => {
 });
 
 test("admin status endpoint returns audit persistence status", async (t) => {
-  const app = buildApp({ adminApiKey: "status-key", adminRateLimitMax: 10, adminRateLimitWindowMs: 60_000 });
+  let now = 50_000;
+  configureStoreRuntime({ nowProvider: () => now });
+  const app = buildApp({
+    adminApiKey: "status-key",
+    adminRateLimitMax: 10,
+    adminRateLimitWindowMs: 60_000,
+    nowProvider: () => now
+  });
   t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "status-key" },
+    payload: { kind: "bio_prescreen", payload: { sample: "status" }, quorum: 1 }
+  });
+  const task = created.json();
+
+  await app.inject({
+    method: "POST",
+    url: "/nodes/status-node/heartbeat",
+    payload: { capabilities: { charging: true, wifi: true, idle: true, userOptIn: true } }
+  });
+
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=status-node" });
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: { nodeId: "status-node", checksum: "status-ok", score: 0.55, payload: {} }
+  });
 
   const unauthorized = await app.inject({ method: "GET", url: "/admin/status" });
   assert.equal(unauthorized.statusCode, 401);
@@ -1036,6 +1064,10 @@ test("admin status endpoint returns audit persistence status", async (t) => {
     headers: { "x-admin-key": "status-key" }
   });
   assert.equal(authorized.statusCode, 200);
+  assert.equal(typeof authorized.json().tasks.total, "number");
+  assert.equal(authorized.json().tasks.completed, 1);
+  assert.equal(typeof authorized.json().nodes.total, "number");
+  assert.equal(authorized.json().nodes.active, 1);
   assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
   assert.equal(typeof authorized.json().auditPersistence.maxBytes, "number");
 });
