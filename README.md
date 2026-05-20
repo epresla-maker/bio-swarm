@@ -172,6 +172,7 @@ Orchestrator:
 - `ADMIN_RATE_LIMIT_MAX` (default `60` requests/window per IP)
 - `ADMIN_RATE_LIMIT_WINDOW_MS` (default `60000`)
 - `AUTO_QUARANTINE_MIN_REJECTED` (default `3`, auto-quarantines enabled nodes when rejected results exceed accepted results and hit this threshold)
+- `AUTO_UNQUARANTINE_AFTER_MS` (default `300000`, auto-re-enables only auto-quarantined nodes after cooldown when a fresh heartbeat arrives)
 - `AUDIT_LOG_PATH` (default `./data/audit-log.jsonl`)
 - `AUDIT_LOG_MAX_BYTES` (default `5000000`)
 - `AUDIT_LOG_MAX_FILES` (default `5`)

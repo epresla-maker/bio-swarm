@@ -250,6 +250,71 @@ test("node is automatically quarantined after repeated rejected results", async 
   assert.ok(audit.json().items.some((item: { eventType: string; details?: { reason?: string } }) => item.eventType === "node_quarantined" && item.details?.reason === "auto_rejection_threshold"));
 });
 
+test("auto-quarantined node is re-enabled after cooldown on fresh heartbeat", async (t) => {
+  let now = 100_000;
+  configureStoreRuntime({
+    autoQuarantineMinRejected: 2,
+    autoUnquarantineAfterMs: 1_000,
+    nowProvider: () => now
+  });
+  const app = buildApp({ adminApiKey: "auto-recover-key", nowProvider: () => now });
+  t.after(() => app.close());
+
+  await app.inject({ method: "POST", url: "/nodes/node-recover/heartbeat", payload: {} });
+
+  for (let index = 0; index < 2; index += 1) {
+    const rejected = await app.inject({
+      method: "POST",
+      url: `/tasks/missing-recover-${index}/result`,
+      payload: {
+        nodeId: "node-recover",
+        checksum: `recover-bad-${index}`,
+        score: 0.2,
+        payload: {}
+      }
+    });
+    assert.equal(rejected.statusCode, 409);
+  }
+
+  let snapshot = await app.inject({ method: "GET", url: "/nodes/node-recover" });
+  assert.equal(snapshot.statusCode, 200);
+  assert.equal(snapshot.json().control.mode, "quarantined");
+  assert.equal(snapshot.json().control.reason, "auto_rejection_threshold");
+
+  now += 1_500;
+
+  const recoveredHeartbeat = await app.inject({ method: "POST", url: "/nodes/node-recover/heartbeat", payload: {} });
+  assert.equal(recoveredHeartbeat.statusCode, 200);
+
+  snapshot = await app.inject({ method: "GET", url: "/nodes/node-recover" });
+  assert.equal(snapshot.statusCode, 200);
+  assert.equal(snapshot.json().control.mode, "enabled");
+  assert.equal(snapshot.json().control.reason, "auto_recovered_after_cooldown");
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "auto-recover-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "auto-recovered" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+
+  const claim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-recover" });
+  assert.equal(claim.statusCode, 200);
+
+  const audit = await app.inject({
+    method: "GET",
+    url: "/nodes/node-recover/audit?limit=10",
+    headers: { "x-admin-key": "auto-recover-key" }
+  });
+  assert.equal(audit.statusCode, 200);
+  assert.ok(audit.json().items.some((item: { eventType: string; details?: { reason?: string } }) => item.eventType === "node_enabled" && item.details?.reason === "auto_recovered_after_cooldown"));
+});
+
 test("GET /nodes/:id/audit returns node-specific audit history", async (t) => {
   let now = 25_000;
   configureStoreRuntime({ nowProvider: () => now });

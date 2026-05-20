@@ -169,6 +169,7 @@ const nodeControlStates = new Map<string, NodeControlState>();
 let leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
 let maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
 let autoQuarantineMinRejected = Number(process.env.AUTO_QUARANTINE_MIN_REJECTED ?? 3);
+let autoUnquarantineAfterMs = Number(process.env.AUTO_UNQUARANTINE_AFTER_MS ?? 300_000);
 let nowProvider: () => number = () => Date.now();
 
 let retryCount = 0;
@@ -189,6 +190,7 @@ export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
   maxAttempts?: number;
   autoQuarantineMinRejected?: number;
+  autoUnquarantineAfterMs?: number;
   nowProvider?: () => number;
 }): void {
   if (typeof options.leaseTtlMs === "number" && Number.isFinite(options.leaseTtlMs) && options.leaseTtlMs > 0) {
@@ -205,6 +207,14 @@ export function configureStoreRuntime(options: {
     options.autoQuarantineMinRejected > 0
   ) {
     autoQuarantineMinRejected = Math.floor(options.autoQuarantineMinRejected);
+  }
+
+  if (
+    typeof options.autoUnquarantineAfterMs === "number" &&
+    Number.isFinite(options.autoUnquarantineAfterMs) &&
+    options.autoUnquarantineAfterMs >= 0
+  ) {
+    autoUnquarantineAfterMs = Math.floor(options.autoUnquarantineAfterMs);
   }
 
   if (options.nowProvider) {
@@ -231,6 +241,7 @@ export function resetStoreForTests(): void {
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   autoQuarantineMinRejected = Number(process.env.AUTO_QUARANTINE_MIN_REJECTED ?? 3);
+  autoUnquarantineAfterMs = Number(process.env.AUTO_UNQUARANTINE_AFTER_MS ?? 300_000);
   nowProvider = () => Date.now();
 }
 
@@ -680,6 +691,7 @@ export function recordHeartbeat(nodeId: string, capabilities?: NodeCapabilities)
   const stats = getNodeStats(nodeId);
   stats.heartbeats += 1;
   stats.lastSeenAt = new Date(nowProvider()).toISOString();
+  maybeAutoUnquarantineNode(nodeId);
   pushAuditEvent({
     eventType: "heartbeat_received",
     nodeId,
@@ -1029,6 +1041,32 @@ function maybeAutoQuarantineNode(nodeId: string, stats: NodeStats): void {
   }
 
   updateNodeControl(nodeId, "quarantined", "auto_rejection_threshold");
+}
+
+function maybeAutoUnquarantineNode(nodeId: string): void {
+  const control = getNodeControlState(nodeId);
+  if (control.mode !== "quarantined") {
+    return;
+  }
+
+  if (control.reason !== "auto_rejection_threshold") {
+    return;
+  }
+
+  if (!control.changedAt) {
+    return;
+  }
+
+  const quarantinedAt = new Date(control.changedAt).getTime();
+  if (!Number.isFinite(quarantinedAt)) {
+    return;
+  }
+
+  if (nowProvider() - quarantinedAt < autoUnquarantineAfterMs) {
+    return;
+  }
+
+  updateNodeControl(nodeId, "enabled", "auto_recovered_after_cooldown");
 }
 
 function pushVerdict(taskId: string, nodeId: string, accepted: boolean, reason: string | null): void {
