@@ -208,6 +208,20 @@ export function renderAdminDashboardPage(): string {
 				font-weight: 600;
 			}
 
+			.trend-wrap {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+			}
+
+			.trend-svg {
+				width: 100%;
+				height: 180px;
+				border-radius: 12px;
+				border: 1px solid var(--line);
+				background: linear-gradient(180deg, #ffffff, #f5fbff);
+			}
+
 			.status {
 				margin: 8px 0 12px;
 				min-height: 20px;
@@ -297,6 +311,11 @@ export function renderAdminDashboardPage(): string {
 					<h3>Experiment Details</h3>
 					<div id="researchDetails" class="mono">Select an experiment to inspect.</div>
 				</article>
+
+				<article class="card wide">
+					<h3>Research Trend (Best Score)</h3>
+					<div id="researchTrend" class="trend-wrap mono">No completed experiments yet.</div>
+				</article>
 			</section>
 		</main>
 
@@ -321,11 +340,13 @@ export function renderAdminDashboardPage(): string {
 				createExperiment: document.getElementById("createExperiment"),
 				refreshResearch: document.getElementById("refreshResearch"),
 				researchList: document.getElementById("researchList"),
-				researchDetails: document.getElementById("researchDetails")
+				researchDetails: document.getElementById("researchDetails"),
+				researchTrend: document.getElementById("researchTrend")
 			};
 
 			let autoRefreshTimer = null;
 			let selectedExperimentId = null;
+			let researchItems = [];
 
 			function row(label, value, badgeClass) {
 				const badge = badgeClass ? '<span class="badge ' + badgeClass + '">' + value + '</span>' : String(value);
@@ -425,6 +446,46 @@ export function renderAdminDashboardPage(): string {
 				});
 			}
 
+			function renderResearchTrend(items) {
+				const points = items
+					.filter((item) => typeof item.bestScore === 'number')
+					.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+				if (!points.length) {
+					els.researchTrend.innerHTML = 'No completed experiments yet.';
+					return;
+				}
+
+				const width = 640;
+				const height = 180;
+				const padX = 34;
+				const padY = 22;
+				const innerWidth = width - padX * 2;
+				const innerHeight = height - padY * 2;
+				const maxScore = 1;
+				const minScore = 0;
+
+				const svgPoints = points
+					.map((item, index) => {
+						const x = padX + (points.length === 1 ? innerWidth / 2 : (index / (points.length - 1)) * innerWidth);
+						const y = padY + (1 - (item.bestScore - minScore) / (maxScore - minScore)) * innerHeight;
+						return { x, y, score: item.bestScore, name: item.name };
+					});
+
+				const path = svgPoints.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+				const last = svgPoints[svgPoints.length - 1];
+				const latest = points[points.length - 1];
+
+				els.researchTrend.innerHTML =
+					'<svg viewBox="0 0 ' + width + ' ' + height + '" class="trend-svg" role="img" aria-label="Research best score trend">' +
+					'<line x1="' + padX + '" y1="' + (height - padY) + '" x2="' + (width - padX) + '" y2="' + (height - padY) + '" stroke="#d4e4f2" />' +
+					'<line x1="' + padX + '" y1="' + padY + '" x2="' + padX + '" y2="' + (height - padY) + '" stroke="#d4e4f2" />' +
+					'<polyline fill="none" stroke="#0ea5e9" stroke-width="3" points="' + path + '" />' +
+					'<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="4" fill="#f59e0b" />' +
+					'</svg>' +
+					'<div>Latest: <strong>' + latest.name + '</strong> | best score=' + latest.bestScore.toFixed(3) + ' | runs=' + points.length + '</div>';
+			}
+
 			function renderResearchDetails(item) {
 				if (!item) {
 					els.researchDetails.innerHTML = 'Select an experiment to inspect.';
@@ -466,7 +527,9 @@ export function renderAdminDashboardPage(): string {
 				}
 
 				const data = await response.json();
-				renderResearchList(data.items || []);
+				researchItems = data.items || [];
+				renderResearchList(researchItems);
+				renderResearchTrend(researchItems);
 			}
 
 			async function loadExperimentDetails() {
@@ -486,6 +549,7 @@ export function renderAdminDashboardPage(): string {
 
 				const item = await response.json();
 				renderResearchDetails(item);
+				renderResearchTrend(researchItems);
 			}
 
 			async function createExperiment() {
