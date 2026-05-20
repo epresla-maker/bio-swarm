@@ -19,6 +19,12 @@ export interface TaskVerdictLogEntry {
   at: string;
 }
 
+export interface VerdictQuery {
+  limit: number;
+  taskId?: string;
+  accepted?: boolean;
+}
+
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
@@ -172,9 +178,21 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
   return { accepted: true };
 }
 
-export function getRecentVerdicts(limit: number): TaskVerdictLogEntry[] {
-  const bounded = Math.max(1, Math.min(100, Math.floor(limit)));
-  return taskVerdicts.slice(-bounded).reverse();
+export function getRecentVerdicts(query: VerdictQuery): TaskVerdictLogEntry[] {
+  const bounded = Math.max(1, Math.min(100, Math.floor(query.limit)));
+  const filtered = taskVerdicts.filter((item) => {
+    if (query.taskId && item.taskId !== query.taskId) {
+      return false;
+    }
+
+    if (typeof query.accepted === "boolean" && item.accepted !== query.accepted) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return filtered.slice(-bounded).reverse();
 }
 
 export function recordHeartbeat(nodeId: string, capabilities?: NodeCapabilities): NodeStats {

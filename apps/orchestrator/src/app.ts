@@ -89,15 +89,34 @@ export function buildApp(options?: { logger?: boolean }) {
     return getTelemetrySnapshot();
   });
 
-  app.get<{ Querystring: { limit?: string } }>("/admin/verdicts", async (request, reply) => {
+  app.get<{ Querystring: { limit?: string; taskId?: string; accepted?: string } }>("/admin/verdicts", async (request, reply) => {
     const rawLimit = request.query.limit;
+    const rawTaskId = request.query.taskId;
+    const rawAccepted = request.query.accepted;
     const parsed = rawLimit ? Number(rawLimit) : 20;
 
     if (!Number.isFinite(parsed) || parsed < 1) {
       return reply.status(400).send({ error: "invalid_limit" });
     }
 
-    return { items: getRecentVerdicts(parsed) };
+    let acceptedFilter: boolean | undefined;
+    if (typeof rawAccepted === "string") {
+      if (rawAccepted === "true") {
+        acceptedFilter = true;
+      } else if (rawAccepted === "false") {
+        acceptedFilter = false;
+      } else {
+        return reply.status(400).send({ error: "invalid_accepted_filter" });
+      }
+    }
+
+    return {
+      items: getRecentVerdicts({
+        limit: parsed,
+        taskId: rawTaskId,
+        accepted: acceptedFilter
+      })
+    };
   });
 
   return app;

@@ -167,4 +167,16 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   assert.equal(items.length, 2);
   assert.equal(items[0].accepted, false);
   assert.equal(items[1].accepted, true);
+
+  const acceptedOnly = await app.inject({ method: "GET", url: "/admin/verdicts?accepted=true&limit=10" });
+  assert.equal(acceptedOnly.statusCode, 200);
+  assert.equal(acceptedOnly.json().items.length, 1);
+  assert.equal(acceptedOnly.json().items[0].accepted, true);
+
+  const byTask = await app.inject({ method: "GET", url: `/admin/verdicts?taskId=${task.id}&limit=10` });
+  assert.equal(byTask.statusCode, 200);
+  assert.equal(byTask.json().items.length, 2);
+
+  const invalidAccepted = await app.inject({ method: "GET", url: "/admin/verdicts?accepted=maybe" });
+  assert.equal(invalidAccepted.statusCode, 400);
 });

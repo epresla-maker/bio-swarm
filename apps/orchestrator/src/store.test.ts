@@ -112,8 +112,15 @@ test("recent verdicts returns newest first and respects limit", () => {
   });
   assert.equal(rejected.accepted, false);
 
-  const verdicts = getRecentVerdicts(2);
+  const verdicts = getRecentVerdicts({ limit: 2 });
   assert.equal(verdicts.length, 2);
   assert.equal(verdicts[0].accepted, false);
   assert.equal(verdicts[1].accepted, true);
+
+  const acceptedOnly = getRecentVerdicts({ limit: 10, accepted: true });
+  assert.equal(acceptedOnly.length, 1);
+  assert.equal(acceptedOnly[0].accepted, true);
+
+  const byTask = getRecentVerdicts({ limit: 10, taskId: task.id });
+  assert.equal(byTask.length, 2);
 });

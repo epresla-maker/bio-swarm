@@ -120,7 +120,7 @@ The orchestrator performs:
 - `GET /nodes/:id/stats`
 - `POST /nodes/:id/heartbeat`
 - `GET /telemetry`
-- `GET /admin/verdicts?limit=20`
+- `GET /admin/verdicts?limit=20&accepted=true&taskId=...`
 
 ## Runtime Env Vars
 
