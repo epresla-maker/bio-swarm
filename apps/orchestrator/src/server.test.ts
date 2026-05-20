@@ -1068,6 +1068,10 @@ test("admin status endpoint returns audit persistence status", async (t) => {
   assert.equal(authorized.json().tasks.completed, 1);
   assert.equal(typeof authorized.json().nodes.total, "number");
   assert.equal(authorized.json().nodes.active, 1);
+  assert.ok(Array.isArray(authorized.json().recentVerdicts));
+  assert.ok(authorized.json().recentVerdicts.length >= 1);
+  assert.ok(Array.isArray(authorized.json().recentAudit));
+  assert.ok(authorized.json().recentAudit.length >= 1);
   assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
   assert.equal(typeof authorized.json().auditPersistence.maxBytes, "number");
 });

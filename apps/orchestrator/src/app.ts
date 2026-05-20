@@ -478,6 +478,8 @@ export function buildApp(options?: {
     return {
       tasks: getTaskStatusSummary(),
       nodes: getNodeStatusSummary(),
+      recentVerdicts: getRecentVerdicts({ limit: 5 }),
+      recentAudit: getAuditLog({ limit: 5 }),
       auditPersistence: getAuditPersistenceStatus()
     };
   });
