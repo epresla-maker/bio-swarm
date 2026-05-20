@@ -66,6 +66,7 @@ export type AuditEventType =
   | "task_created"
   | "task_claimed"
   | "task_canceled"
+  | "task_deleted"
   | "task_requeued"
   | "result_submitted"
   | "result_rejected"
@@ -435,6 +436,28 @@ export function requeueTask(taskId: string): { requeued: boolean; reason?: strin
   });
 
   return { requeued: true };
+}
+
+export function deleteTask(taskId: string): { deleted: boolean; reason?: string } {
+  sweepExpiredLeases();
+
+  const record = tasks.get(taskId);
+  if (!record) {
+    return { deleted: false, reason: "task_not_found" };
+  }
+
+  tasks.delete(taskId);
+  pushAuditEvent({
+    eventType: "task_deleted",
+    taskId,
+    details: {
+      state: record.completed ? "completed" : record.failed ? "failed" : record.leaseOwner ? "leased" : "pending",
+      attempts: record.attempts,
+      resultCount: record.results.length
+    }
+  });
+
+  return { deleted: true };
 }
 
 export function getRecentVerdicts(query: VerdictQuery): TaskVerdictLogEntry[] {

@@ -4,6 +4,7 @@ import {
   addTask,
   cancelTask,
   claimTask,
+  deleteTask,
   getAuditLog,
   getAuditPersistenceStatus,
   getNodeSnapshot,
@@ -43,6 +44,7 @@ export function buildApp(options?: {
     "task_created",
     "task_claimed",
     "task_canceled",
+    "task_deleted",
     "task_requeued",
     "result_submitted",
     "result_rejected",
@@ -128,6 +130,7 @@ export function buildApp(options?: {
         | "task_created"
         | "task_claimed"
         | "task_canceled"
+        | "task_deleted"
         | "task_requeued"
         | "result_submitted"
         | "result_rejected"
@@ -322,6 +325,19 @@ export function buildApp(options?: {
 
     if (!verdict.requeued) {
       return reply.status(409).send(verdict);
+    }
+
+    return reply.status(200).send(verdict);
+  });
+
+  app.delete<{ Params: { id: string } }>("/tasks/:id", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const verdict = deleteTask(request.params.id);
+    if (!verdict.deleted) {
+      return reply.status(404).send(verdict);
     }
 
     return reply.status(200).send(verdict);

@@ -391,6 +391,48 @@ test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
   assert.equal(missing.statusCode, 404);
 });
 
+test("DELETE /tasks/:id removes task from queue", async (t) => {
+  const app = buildApp({ adminApiKey: "ops-key" });
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "delete-1" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  const task = created.json();
+
+  const unauthorized = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const deleted = await app.inject({
+    method: "DELETE",
+    url: `/tasks/${task.id}`,
+    headers: { "x-admin-key": "ops-key" }
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().deleted, true);
+
+  const missingSnapshot = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(missingSnapshot.statusCode, 404);
+
+  const claim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-after-delete" });
+  assert.equal(claim.statusCode, 204);
+
+  const missing = await app.inject({
+    method: "DELETE",
+    url: `/tasks/${task.id}`,
+    headers: { "x-admin-key": "ops-key" }
+  });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("GET /tasks lists and filters by state", async (t) => {
   const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
@@ -927,6 +969,23 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   });
   assert.equal(requeuedEvents.statusCode, 200);
   assert.ok(requeuedEvents.json().items.some((item: { eventType: string }) => item.eventType === "task_requeued"));
+
+  const deleteTask = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "audit-key" },
+    payload: { kind: "bio_prescreen", payload: { sample: "delete-audit" }, quorum: 1 }
+  });
+  const deleteTaskId = deleteTask.json().id;
+  await app.inject({ method: "DELETE", url: `/tasks/${deleteTaskId}`, headers: { "x-admin-key": "audit-key" } });
+
+  const deletedEvents = await app.inject({
+    method: "GET",
+    url: "/admin/audit?eventType=task_deleted",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(deletedEvents.statusCode, 200);
+  assert.ok(deletedEvents.json().items.some((item: { eventType: string }) => item.eventType === "task_deleted"));
 
   const invalidType = await app.inject({
     method: "GET",

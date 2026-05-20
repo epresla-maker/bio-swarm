@@ -144,6 +144,7 @@ The orchestrator performs:
 - `POST /tasks/:id/result`
 - `POST /tasks/:id/cancel` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `POST /tasks/:id/requeue` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `DELETE /tasks/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /nodes?active=true|false&limit=50`
 - `GET /nodes/:id`
 - `GET /nodes/:id/audit?limit=50&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
@@ -155,7 +156,7 @@ The orchestrator performs:
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 
-Audit event types include: `task_created`, `task_claimed`, `task_canceled`, `task_requeued`, `result_submitted`, `result_rejected`, `heartbeat_received`, `lease_expired`.
+Audit event types include: `task_created`, `task_claimed`, `task_canceled`, `task_deleted`, `task_requeued`, `result_submitted`, `result_rejected`, `heartbeat_received`, `lease_expired`.
 
 ## Runtime Env Vars
 
