@@ -137,6 +137,7 @@ The orchestrator performs:
 - `GET /tasks/:id`
 - `GET /tasks/claim?nodeId=...`
 - `POST /tasks/:id/result`
+- `GET /nodes?active=true|false&limit=50`
 - `GET /nodes/:id/stats`
 - `POST /nodes/:id/heartbeat`
 - `GET /telemetry`

@@ -27,6 +27,11 @@ export interface TaskListQuery {
   state?: TaskSnapshot["state"];
 }
 
+export interface NodeListQuery {
+  limit: number;
+  activeOnly?: boolean;
+}
+
 export interface TaskVerdictLogEntry {
   taskId: string;
   nodeId: string;
@@ -482,6 +487,31 @@ export function getNodeStats(nodeId: string): NodeStats {
   }
 
   return nodeStats.get(nodeId)!;
+}
+
+export function listNodeStats(query: NodeListQuery): NodeStats[] {
+  const bounded = Math.max(1, Math.min(200, Math.floor(query.limit)));
+  const now = nowProvider();
+
+  const items = Array.from(nodeStats.values()).filter((stats) => {
+    if (!query.activeOnly) {
+      return true;
+    }
+
+    if (!stats.lastSeenAt) {
+      return false;
+    }
+
+    return now - new Date(stats.lastSeenAt).getTime() <= 60_000;
+  });
+
+  items.sort((a, b) => {
+    const aTime = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : 0;
+    const bTime = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  return items.slice(0, bounded);
 }
 
 export function listTaskSnapshots(query: TaskListQuery): TaskSnapshot[] {

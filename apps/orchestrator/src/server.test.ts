@@ -43,6 +43,39 @@ test("heartbeat updates node stats and telemetry", async (t) => {
   assert.equal(telemetry.json().totalNodes, 1);
 });
 
+test("GET /nodes lists and filters active nodes", async (t) => {
+  let now = 10_000;
+  configureStoreRuntime({ nowProvider: () => now });
+  const app = buildApp({ nowProvider: () => now });
+  t.after(() => app.close());
+
+  const hb1 = await app.inject({ method: "POST", url: "/nodes/node-a/heartbeat", payload: {} });
+  assert.equal(hb1.statusCode, 200);
+
+  now += 61_000;
+  const hb2 = await app.inject({ method: "POST", url: "/nodes/node-b/heartbeat", payload: {} });
+  assert.equal(hb2.statusCode, 200);
+
+  const all = await app.inject({ method: "GET", url: "/nodes?limit=10" });
+  assert.equal(all.statusCode, 200);
+  assert.equal(all.json().items.length, 2);
+
+  const activeOnly = await app.inject({ method: "GET", url: "/nodes?active=true&limit=10" });
+  assert.equal(activeOnly.statusCode, 200);
+  assert.equal(activeOnly.json().items.length, 1);
+  assert.equal(activeOnly.json().items[0].nodeId, "node-b");
+
+  const includeInactive = await app.inject({ method: "GET", url: "/nodes?active=false&limit=10" });
+  assert.equal(includeInactive.statusCode, 200);
+  assert.equal(includeInactive.json().items.length, 2);
+
+  const invalidActive = await app.inject({ method: "GET", url: "/nodes?active=maybe" });
+  assert.equal(invalidActive.statusCode, 400);
+
+  const invalidLimit = await app.inject({ method: "GET", url: "/nodes?limit=0" });
+  assert.equal(invalidLimit.statusCode, 400);
+});
+
 test("task can be created, claimed and completed", async (t) => {
   const app = buildApp();
   t.after(() => app.close());
