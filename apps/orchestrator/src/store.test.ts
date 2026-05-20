@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   addTask,
   claimTask,
+  configureAuditLogPersistence,
   configureStoreRuntime,
   getAuditLog,
   getRecentVerdicts,
@@ -156,4 +160,26 @@ test("audit log supports filtering by node, event type and time range", () => {
 
   const range = getAuditLog({ limit: 20, since: now - 1, until: now });
   assert.ok(range.some((item) => item.eventType === "result_submitted"));
+});
+
+test("audit log persists to disk and can be loaded again", () => {
+  let now = 50_000;
+  resetStoreForTests();
+  configureStoreRuntime({ nowProvider: () => now });
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bio-swarm-audit-"));
+  const file = path.join(dir, "audit.jsonl");
+
+  configureAuditLogPersistence(file);
+  addTask({ kind: "bio_prescreen", payload: { sample: "persist" }, quorum: 1 });
+
+  const text = fs.readFileSync(file, "utf8");
+  assert.ok(text.includes("task_created"));
+
+  resetStoreForTests();
+  configureAuditLogPersistence(file);
+  const loaded = getAuditLog({ limit: 10, eventType: "task_created" });
+  assert.equal(loaded.length, 1);
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });

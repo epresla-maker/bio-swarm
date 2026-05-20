@@ -133,6 +133,7 @@ Orchestrator:
 - `ADMIN_API_KEY` (required for `/admin/*` endpoints)
 - `ADMIN_RATE_LIMIT_MAX` (default `60` requests/window per IP)
 - `ADMIN_RATE_LIMIT_WINDOW_MS` (default `60000`)
+- `AUDIT_LOG_PATH` (default `./data/audit-log.jsonl`)
 
 Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)

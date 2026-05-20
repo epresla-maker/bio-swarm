@@ -1,4 +1,7 @@
 import { buildApp } from "./app.js";
+import { configureAuditLogPersistence } from "./store.js";
+
+configureAuditLogPersistence(process.env.AUDIT_LOG_PATH ?? "./data/audit-log.jsonl");
 
 const app = buildApp({
   logger: true,

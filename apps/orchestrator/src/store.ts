@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { NodeCapabilities, NodeStats, SwarmTask, TaskResult, TelemetrySnapshot } from "@bio-swarm/shared";
 
 interface TaskRecord {
@@ -64,6 +66,7 @@ const taskVerdicts: TaskVerdictLogEntry[] = [];
 const MAX_VERDICT_LOG = 200;
 const auditLog: AuditLogEntry[] = [];
 const MAX_AUDIT_LOG = 500;
+let auditLogPath: string | null = null;
 
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
@@ -91,9 +94,20 @@ export function resetStoreForTests(): void {
   expiredLeaseCount = 0;
   taskVerdicts.length = 0;
   auditLog.length = 0;
+  auditLogPath = null;
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   nowProvider = () => Date.now();
+}
+
+export function configureAuditLogPersistence(filePath?: string): void {
+  if (!filePath) {
+    auditLogPath = null;
+    return;
+  }
+
+  auditLogPath = filePath;
+  ensureAuditLogLoadedFromDisk(filePath);
 }
 
 export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
@@ -443,12 +457,57 @@ function pushVerdict(taskId: string, nodeId: string, accepted: boolean, reason: 
 }
 
 function pushAuditEvent(event: Omit<AuditLogEntry, "at">): void {
-  auditLog.push({
+  const entry: AuditLogEntry = {
     ...event,
     at: new Date(nowProvider()).toISOString()
-  });
+  };
+
+  auditLog.push(entry);
 
   if (auditLog.length > MAX_AUDIT_LOG) {
     auditLog.splice(0, auditLog.length - MAX_AUDIT_LOG);
+  }
+
+  if (!auditLogPath) {
+    return;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(auditLogPath), { recursive: true });
+    fs.appendFileSync(auditLogPath, `${JSON.stringify(entry)}\n`, "utf8");
+  } catch {
+    // Persistence failures should not break API behavior in MVP mode.
+  }
+}
+
+function ensureAuditLogLoadedFromDisk(filePath: string): void {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, "", "utf8");
+      return;
+    }
+
+    const text = fs.readFileSync(filePath, "utf8");
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+
+    auditLog.length = 0;
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line) as AuditLogEntry;
+        if (!parsed || typeof parsed.at !== "string" || typeof parsed.eventType !== "string") {
+          continue;
+        }
+        auditLog.push(parsed);
+      } catch {
+        continue;
+      }
+    }
+
+    if (auditLog.length > MAX_AUDIT_LOG) {
+      auditLog.splice(0, auditLog.length - MAX_AUDIT_LOG);
+    }
+  } catch {
+    // Ignore persistence bootstrap failures in MVP mode.
   }
 }
