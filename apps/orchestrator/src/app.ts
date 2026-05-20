@@ -7,6 +7,7 @@ import {
   getAuditPersistenceStatus,
   getNodeStats,
   getRecentVerdicts,
+  getTaskSnapshot,
   getTelemetrySnapshot,
   recordHeartbeat,
   submitResult
@@ -154,6 +155,15 @@ export function buildApp(options?: {
     }
 
     return reply.status(200).send(task);
+  });
+
+  app.get<{ Params: { id: string } }>("/tasks/:id", async (request, reply) => {
+    const snapshot = getTaskSnapshot(request.params.id);
+    if (!snapshot) {
+      return reply.status(404).send({ error: "task_not_found" });
+    }
+
+    return reply.status(200).send(snapshot);
   });
 
   app.post<{ Params: { id: string }; Body: Omit<TaskResult, "taskId" | "submittedAt"> }>(

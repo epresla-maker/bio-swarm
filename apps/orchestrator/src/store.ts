@@ -13,6 +13,15 @@ interface TaskRecord {
   attempts: number;
 }
 
+export interface TaskSnapshot {
+  task: SwarmTask;
+  state: "pending" | "leased" | "completed" | "failed";
+  attempts: number;
+  resultCount: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+}
+
 export interface TaskVerdictLogEntry {
   taskId: string;
   nodeId: string;
@@ -468,6 +477,33 @@ export function getNodeStats(nodeId: string): NodeStats {
   }
 
   return nodeStats.get(nodeId)!;
+}
+
+export function getTaskSnapshot(taskId: string): TaskSnapshot | null {
+  sweepExpiredLeases();
+
+  const record = tasks.get(taskId);
+  if (!record) {
+    return null;
+  }
+
+  let state: TaskSnapshot["state"] = "pending";
+  if (record.completed) {
+    state = "completed";
+  } else if (record.failed) {
+    state = "failed";
+  } else if (record.leaseOwner) {
+    state = "leased";
+  }
+
+  return {
+    task: record.task,
+    state,
+    attempts: record.attempts,
+    resultCount: record.results.length,
+    leaseOwner: record.leaseOwner,
+    leaseExpiresAt: record.leaseExpiresAt === null ? null : new Date(record.leaseExpiresAt).toISOString()
+  };
 }
 
 function touchNode(nodeId: string): void {

@@ -83,6 +83,57 @@ test("task can be created, claimed and completed", async (t) => {
   assert.equal(telemetry.json().queue.completed, 1);
 });
 
+test("GET /tasks/:id returns lifecycle snapshot", async (t) => {
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "CCN" },
+      quorum: 1
+    }
+  });
+
+  assert.equal(created.statusCode, 201);
+  const task = created.json();
+
+  const pending = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(pending.statusCode, 200);
+  assert.equal(pending.json().state, "pending");
+  assert.equal(pending.json().attempts, 0);
+
+  const claimed = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-snap" });
+  assert.equal(claimed.statusCode, 200);
+
+  const leased = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(leased.statusCode, 200);
+  assert.equal(leased.json().state, "leased");
+  assert.equal(leased.json().leaseOwner, "node-snap");
+
+  const result = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-snap",
+      checksum: "snap-ok",
+      score: 0.92,
+      payload: {}
+    }
+  });
+  assert.equal(result.statusCode, 202);
+
+  const completed = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(completed.statusCode, 200);
+  assert.equal(completed.json().state, "completed");
+  assert.equal(completed.json().resultCount, 1);
+
+  const missing = await app.inject({ method: "GET", url: "/tasks/not-found" });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("expired lease allows another node to claim same task", async (t) => {
   let now = 1_000;
   configureStoreRuntime({
