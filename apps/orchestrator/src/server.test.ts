@@ -76,6 +76,41 @@ test("GET /nodes lists and filters active nodes", async (t) => {
   assert.equal(invalidLimit.statusCode, 400);
 });
 
+test("GET /nodes/:id returns node snapshot", async (t) => {
+  let now = 20_000;
+  configureStoreRuntime({ nowProvider: () => now });
+  const app = buildApp({ nowProvider: () => now });
+  t.after(() => app.close());
+
+  const missing = await app.inject({ method: "GET", url: "/nodes/missing" });
+  assert.equal(missing.statusCode, 404);
+
+  const heartbeat = await app.inject({
+    method: "POST",
+    url: "/nodes/node-snapshot/heartbeat",
+    payload: {
+      capabilities: {
+        charging: true,
+        wifi: true,
+        idle: false,
+        userOptIn: true
+      }
+    }
+  });
+  assert.equal(heartbeat.statusCode, 200);
+
+  const current = await app.inject({ method: "GET", url: "/nodes/node-snapshot" });
+  assert.equal(current.statusCode, 200);
+  assert.equal(current.json().active, true);
+  assert.equal(current.json().stats.nodeId, "node-snapshot");
+  assert.equal(current.json().capabilities.charging, true);
+
+  now += 61_000;
+  const stale = await app.inject({ method: "GET", url: "/nodes/node-snapshot" });
+  assert.equal(stale.statusCode, 200);
+  assert.equal(stale.json().active, false);
+});
+
 test("task can be created, claimed and completed", async (t) => {
   const app = buildApp();
   t.after(() => app.close());

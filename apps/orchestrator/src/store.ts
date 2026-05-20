@@ -37,6 +37,12 @@ export interface NodeListQuery {
   activeOnly?: boolean;
 }
 
+export interface NodeSnapshot {
+  stats: NodeStats;
+  capabilities: NodeCapabilities | null;
+  active: boolean;
+}
+
 export interface TaskVerdictLogEntry {
   taskId: string;
   nodeId: string;
@@ -566,6 +572,19 @@ export function listNodeStats(query: NodeListQuery): NodeStats[] {
   return items.slice(0, bounded);
 }
 
+export function getNodeSnapshot(nodeId: string): NodeSnapshot | null {
+  const stats = nodeStats.get(nodeId);
+  if (!stats) {
+    return null;
+  }
+
+  return {
+    stats,
+    capabilities: nodeCapabilities.get(nodeId) ?? null,
+    active: isNodeActive(stats)
+  };
+}
+
 export function listTaskSnapshots(query: TaskListQuery): TaskSnapshot[] {
   sweepExpiredLeases();
 
@@ -637,6 +656,14 @@ function getTaskState(record: TaskRecord): TaskSnapshot["state"] {
   }
 
   return "pending";
+}
+
+function isNodeActive(stats: NodeStats): boolean {
+  if (!stats.lastSeenAt) {
+    return false;
+  }
+
+  return nowProvider() - new Date(stats.lastSeenAt).getTime() <= 60_000;
 }
 
 function touchNode(nodeId: string): void {

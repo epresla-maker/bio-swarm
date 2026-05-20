@@ -6,6 +6,7 @@ import {
   claimTask,
   getAuditLog,
   getAuditPersistenceStatus,
+  getNodeSnapshot,
   getTaskVerdicts,
   listTaskResults,
   listNodeStats,
@@ -286,6 +287,15 @@ export function buildApp(options?: {
 
     const items = listNodeStats({ limit: parsedLimit, activeOnly });
     return reply.status(200).send({ items });
+  });
+
+  app.get<{ Params: { id: string } }>("/nodes/:id", async (request, reply) => {
+    const snapshot = getNodeSnapshot(request.params.id);
+    if (!snapshot) {
+      return reply.status(404).send({ error: "node_not_found" });
+    }
+
+    return reply.status(200).send(snapshot);
   });
 
   app.get<{ Params: { id: string } }>("/nodes/:id/stats", async (request) => {
