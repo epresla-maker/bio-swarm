@@ -200,3 +200,29 @@ test("audit log rotates when file exceeds max bytes", () => {
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("audit log retention removes old rotated files", () => {
+  let now = 200_000_000;
+  resetStoreForTests();
+  configureStoreRuntime({ nowProvider: () => now });
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bio-swarm-audit-retention-"));
+  const file = path.join(dir, "audit.jsonl");
+  const oldRotated = `${file}.9`;
+  const recentRotated = `${file}.8`;
+
+  fs.writeFileSync(oldRotated, "old\n", "utf8");
+  fs.writeFileSync(recentRotated, "recent\n", "utf8");
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  fs.utimesSync(oldRotated, new Date(now - 2 * dayMs), new Date(now - 2 * dayMs));
+  fs.utimesSync(recentRotated, new Date(now - dayMs / 2), new Date(now - dayMs / 2));
+
+  configureAuditLogPersistence({ filePath: file, maxBytes: 5000000, maxFiles: 5, retentionDays: 1 });
+  addTask({ kind: "bio_prescreen", payload: { sample: "retention" }, quorum: 1 });
+
+  assert.equal(fs.existsSync(oldRotated), false);
+  assert.equal(fs.existsSync(recentRotated), true);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});

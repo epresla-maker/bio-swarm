@@ -136,6 +136,7 @@ Orchestrator:
 - `AUDIT_LOG_PATH` (default `./data/audit-log.jsonl`)
 - `AUDIT_LOG_MAX_BYTES` (default `5000000`)
 - `AUDIT_LOG_MAX_FILES` (default `5`)
+- `AUDIT_LOG_RETENTION_DAYS` (default `30`, rotated files older than this are removed)
 
 Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)

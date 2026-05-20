@@ -4,7 +4,8 @@ import { configureAuditLogPersistence } from "./store.js";
 configureAuditLogPersistence({
   filePath: process.env.AUDIT_LOG_PATH ?? "./data/audit-log.jsonl",
   maxBytes: Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000),
-  maxFiles: Number(process.env.AUDIT_LOG_MAX_FILES ?? 5)
+  maxFiles: Number(process.env.AUDIT_LOG_MAX_FILES ?? 5),
+  retentionDays: Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30)
 });
 
 const app = buildApp({

@@ -69,6 +69,7 @@ const MAX_AUDIT_LOG = 500;
 let auditLogPath: string | null = null;
 let auditLogMaxBytes = Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000);
 let auditLogMaxFiles = Number(process.env.AUDIT_LOG_MAX_FILES ?? 5);
+let auditLogRetentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30);
 
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
@@ -99,17 +100,19 @@ export function resetStoreForTests(): void {
   auditLogPath = null;
   auditLogMaxBytes = Number(process.env.AUDIT_LOG_MAX_BYTES ?? 5_000_000);
   auditLogMaxFiles = Number(process.env.AUDIT_LOG_MAX_FILES ?? 5);
+  auditLogRetentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30);
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   nowProvider = () => Date.now();
 }
 
 export function configureAuditLogPersistence(
-  config?: string | { filePath?: string; maxBytes?: number; maxFiles?: number }
+  config?: string | { filePath?: string; maxBytes?: number; maxFiles?: number; retentionDays?: number }
 ): void {
   const filePath = typeof config === "string" ? config : config?.filePath;
   const maxBytes = typeof config === "object" ? config.maxBytes : undefined;
   const maxFiles = typeof config === "object" ? config.maxFiles : undefined;
+  const retentionDays = typeof config === "object" ? config.retentionDays : undefined;
 
   if (typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0) {
     auditLogMaxBytes = maxBytes;
@@ -117,6 +120,10 @@ export function configureAuditLogPersistence(
 
   if (typeof maxFiles === "number" && Number.isFinite(maxFiles) && maxFiles > 0) {
     auditLogMaxFiles = Math.floor(maxFiles);
+  }
+
+  if (typeof retentionDays === "number" && Number.isFinite(retentionDays) && retentionDays >= 0) {
+    auditLogRetentionDays = retentionDays;
   }
 
   if (!filePath) {
@@ -533,6 +540,8 @@ function ensureAuditLogLoadedFromDisk(filePath: string): void {
 }
 
 function rotateAuditLogIfNeeded(filePath: string, nextEntryBytes: number): void {
+  pruneExpiredRotatedAuditFiles(filePath);
+
   if (auditLogMaxBytes <= 0) {
     return;
   }
@@ -563,4 +572,41 @@ function rotateAuditLogIfNeeded(filePath: string, nextEntryBytes: number): void 
   if (fs.existsSync(filePath)) {
     fs.renameSync(filePath, `${filePath}.1`);
   }
+
+  pruneExpiredRotatedAuditFiles(filePath);
+}
+
+function pruneExpiredRotatedAuditFiles(filePath: string): void {
+  if (auditLogRetentionDays <= 0) {
+    return;
+  }
+
+  const cutoffMs = nowProvider() - auditLogRetentionDays * 24 * 60 * 60 * 1000;
+  const directory = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const rotatedPattern = new RegExp(`^${escapeRegex(base)}\\.\\d+$`);
+
+  if (!fs.existsSync(directory)) {
+    return;
+  }
+
+  for (const name of fs.readdirSync(directory)) {
+    if (!rotatedPattern.test(name)) {
+      continue;
+    }
+
+    const fullPath = path.join(directory, name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (stat.mtimeMs < cutoffMs) {
+        fs.unlinkSync(fullPath);
+      }
+    } catch {
+      continue;
+    }
+  }
+}
+
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
