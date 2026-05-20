@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
 import {
   addTask,
+  cancelTask,
   claimTask,
   getAuditLog,
   getAuditPersistenceStatus,
@@ -37,6 +38,7 @@ export function buildApp(options?: {
   const allowedAuditEventTypes = new Set([
     "task_created",
     "task_claimed",
+    "task_canceled",
     "result_submitted",
     "result_rejected",
     "heartbeat_received",
@@ -120,6 +122,7 @@ export function buildApp(options?: {
       eventType: eventType as
         | "task_created"
         | "task_claimed"
+        | "task_canceled"
         | "result_submitted"
         | "result_rejected"
         | "heartbeat_received"
@@ -215,6 +218,20 @@ export function buildApp(options?: {
       return reply.status(202).send(verdict);
     }
   );
+
+  app.post<{ Params: { id: string } }>("/tasks/:id/cancel", async (request, reply) => {
+    const verdict = cancelTask(request.params.id);
+
+    if (!verdict.canceled && verdict.reason === "task_not_found") {
+      return reply.status(404).send(verdict);
+    }
+
+    if (!verdict.canceled && verdict.reason === "task_already_completed") {
+      return reply.status(409).send(verdict);
+    }
+
+    return reply.status(200).send(verdict);
+  });
 
   app.get<{ Querystring: { active?: string; limit?: string } }>("/nodes", async (request, reply) => {
     const rawLimit = request.query.limit;

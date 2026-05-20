@@ -49,6 +49,7 @@ export interface VerdictQuery {
 export type AuditEventType =
   | "task_created"
   | "task_claimed"
+  | "task_canceled"
   | "result_submitted"
   | "result_rejected"
   | "heartbeat_received"
@@ -360,6 +361,33 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
   });
 
   return { accepted: true };
+}
+
+export function cancelTask(taskId: string): { canceled: boolean; reason?: string } {
+  sweepExpiredLeases();
+
+  const record = tasks.get(taskId);
+  if (!record) {
+    return { canceled: false, reason: "task_not_found" };
+  }
+
+  if (record.completed) {
+    return { canceled: false, reason: "task_already_completed" };
+  }
+
+  if (record.failed) {
+    return { canceled: true, reason: "task_already_failed" };
+  }
+
+  record.failed = true;
+  clearLease(record);
+  pushAuditEvent({
+    eventType: "task_canceled",
+    taskId,
+    details: { attempts: record.attempts, resultCount: record.results.length }
+  });
+
+  return { canceled: true };
 }
 
 export function getRecentVerdicts(query: VerdictQuery): TaskVerdictLogEntry[] {

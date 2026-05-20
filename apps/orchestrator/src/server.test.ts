@@ -116,6 +116,69 @@ test("task can be created, claimed and completed", async (t) => {
   assert.equal(telemetry.json().queue.completed, 1);
 });
 
+test("POST /tasks/:id/cancel cancels pending task and blocks further claims", async (t) => {
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "cancel-1" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  const task = created.json();
+
+  const canceled = await app.inject({ method: "POST", url: `/tasks/${task.id}/cancel` });
+  assert.equal(canceled.statusCode, 200);
+  assert.equal(canceled.json().canceled, true);
+
+  const claim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-after-cancel" });
+  assert.equal(claim.statusCode, 204);
+
+  const snapshot = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+  assert.equal(snapshot.statusCode, 200);
+  assert.equal(snapshot.json().state, "failed");
+
+  const missing = await app.inject({ method: "POST", url: "/tasks/not-found/cancel" });
+  assert.equal(missing.statusCode, 404);
+});
+
+test("canceling completed task returns conflict", async (t) => {
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "COC" },
+      quorum: 1
+    }
+  });
+  const task = created.json();
+
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-cancel-conflict" });
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-cancel-conflict",
+      checksum: "done",
+      score: 0.9,
+      payload: {}
+    }
+  });
+
+  const canceled = await app.inject({ method: "POST", url: `/tasks/${task.id}/cancel` });
+  assert.equal(canceled.statusCode, 409);
+  assert.equal(canceled.json().reason, "task_already_completed");
+});
+
 test("GET /tasks lists and filters by state", async (t) => {
   const app = buildApp();
   t.after(() => app.close());
@@ -435,6 +498,22 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   });
   assert.equal(byType.statusCode, 200);
   assert.ok(byType.json().items.some((item: { eventType: string }) => item.eventType === "result_submitted"));
+
+  const cancelTask = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: { kind: "bio_prescreen", payload: { sample: "cancel-audit" }, quorum: 1 }
+  });
+  const cancelTaskId = cancelTask.json().id;
+  await app.inject({ method: "POST", url: `/tasks/${cancelTaskId}/cancel` });
+
+  const canceledEvents = await app.inject({
+    method: "GET",
+    url: "/admin/audit?eventType=task_canceled",
+    headers: { "x-admin-key": "audit-key" }
+  });
+  assert.equal(canceledEvents.statusCode, 200);
+  assert.ok(canceledEvents.json().items.some((item: { eventType: string }) => item.eventType === "task_canceled"));
 
   const invalidType = await app.inject({
     method: "GET",
