@@ -5,6 +5,7 @@ import {
   claimTask,
   getAuditLog,
   getAuditPersistenceStatus,
+  listTaskSnapshots,
   getNodeStats,
   getRecentVerdicts,
   getTaskSnapshot,
@@ -141,6 +142,26 @@ export function buildApp(options?: {
 
     const task = addTask({ kind, payload: payload ?? {}, quorum });
     return reply.status(201).send(task);
+  });
+
+  app.get<{ Querystring: { state?: string; limit?: string } }>("/tasks", async (request, reply) => {
+    const rawLimit = request.query.limit;
+    const parsedLimit = rawLimit ? Number(rawLimit) : 20;
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+      return reply.status(400).send({ error: "invalid_limit" });
+    }
+
+    const rawState = request.query.state;
+    const allowedStates = new Set(["pending", "leased", "completed", "failed"]);
+    if (rawState && !allowedStates.has(rawState)) {
+      return reply.status(400).send({ error: "invalid_state" });
+    }
+
+    const items = listTaskSnapshots({
+      limit: parsedLimit,
+      state: rawState as "pending" | "leased" | "completed" | "failed" | undefined
+    });
+    return reply.status(200).send({ items });
   });
 
   app.get<{ Querystring: { nodeId?: string } }>("/tasks/claim", async (request, reply) => {

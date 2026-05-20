@@ -83,6 +83,69 @@ test("task can be created, claimed and completed", async (t) => {
   assert.equal(telemetry.json().queue.completed, 1);
 });
 
+test("GET /tasks lists and filters by state", async (t) => {
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const completedCreated = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "CCO" },
+      quorum: 1
+    }
+  });
+  assert.equal(completedCreated.statusCode, 201);
+  const completedTask = completedCreated.json();
+
+  const claim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-list" });
+  assert.equal(claim.statusCode, 200);
+
+  const submit = await app.inject({
+    method: "POST",
+    url: `/tasks/${completedTask.id}/result`,
+    payload: {
+      nodeId: "node-list",
+      checksum: "list-ok",
+      score: 0.71,
+      payload: {}
+    }
+  });
+  assert.equal(submit.statusCode, 202);
+
+  const pendingCreated = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "CCC" },
+      quorum: 1
+    }
+  });
+  assert.equal(pendingCreated.statusCode, 201);
+
+  const all = await app.inject({ method: "GET", url: "/tasks?limit=10" });
+  assert.equal(all.statusCode, 200);
+  assert.equal(all.json().items.length, 2);
+
+  const completedOnly = await app.inject({ method: "GET", url: "/tasks?state=completed&limit=10" });
+  assert.equal(completedOnly.statusCode, 200);
+  assert.equal(completedOnly.json().items.length, 1);
+  assert.equal(completedOnly.json().items[0].state, "completed");
+
+  const pendingOnly = await app.inject({ method: "GET", url: "/tasks?state=pending&limit=10" });
+  assert.equal(pendingOnly.statusCode, 200);
+  assert.equal(pendingOnly.json().items.length, 1);
+  assert.equal(pendingOnly.json().items[0].state, "pending");
+
+  const invalidState = await app.inject({ method: "GET", url: "/tasks?state=unknown" });
+  assert.equal(invalidState.statusCode, 400);
+
+  const invalidLimit = await app.inject({ method: "GET", url: "/tasks?limit=0" });
+  assert.equal(invalidLimit.statusCode, 400);
+});
+
 test("GET /tasks/:id returns lifecycle snapshot", async (t) => {
   const app = buildApp();
   t.after(() => app.close());

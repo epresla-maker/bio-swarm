@@ -133,6 +133,7 @@ The orchestrator performs:
 ## API Endpoints (MVP)
 
 - `POST /tasks`
+- `GET /tasks?state=pending|leased|completed|failed&limit=20`
 - `GET /tasks/:id`
 - `GET /tasks/claim?nodeId=...`
 - `POST /tasks/:id/result`

@@ -22,6 +22,11 @@ export interface TaskSnapshot {
   leaseExpiresAt: string | null;
 }
 
+export interface TaskListQuery {
+  limit: number;
+  state?: TaskSnapshot["state"];
+}
+
 export interface TaskVerdictLogEntry {
   taskId: string;
   nodeId: string;
@@ -479,6 +484,28 @@ export function getNodeStats(nodeId: string): NodeStats {
   return nodeStats.get(nodeId)!;
 }
 
+export function listTaskSnapshots(query: TaskListQuery): TaskSnapshot[] {
+  sweepExpiredLeases();
+
+  const bounded = Math.max(1, Math.min(100, Math.floor(query.limit)));
+  const snapshots: TaskSnapshot[] = [];
+
+  for (const [taskId] of tasks) {
+    const snapshot = getTaskSnapshot(taskId);
+    if (!snapshot) {
+      continue;
+    }
+
+    if (query.state && snapshot.state !== query.state) {
+      continue;
+    }
+
+    snapshots.push(snapshot);
+  }
+
+  return snapshots.slice(-bounded).reverse();
+}
+
 export function getTaskSnapshot(taskId: string): TaskSnapshot | null {
   sweepExpiredLeases();
 
@@ -487,14 +514,7 @@ export function getTaskSnapshot(taskId: string): TaskSnapshot | null {
     return null;
   }
 
-  let state: TaskSnapshot["state"] = "pending";
-  if (record.completed) {
-    state = "completed";
-  } else if (record.failed) {
-    state = "failed";
-  } else if (record.leaseOwner) {
-    state = "leased";
-  }
+  const state = getTaskState(record);
 
   return {
     task: record.task,
@@ -504,6 +524,22 @@ export function getTaskSnapshot(taskId: string): TaskSnapshot | null {
     leaseOwner: record.leaseOwner,
     leaseExpiresAt: record.leaseExpiresAt === null ? null : new Date(record.leaseExpiresAt).toISOString()
   };
+}
+
+function getTaskState(record: TaskRecord): TaskSnapshot["state"] {
+  if (record.completed) {
+    return "completed";
+  }
+
+  if (record.failed) {
+    return "failed";
+  }
+
+  if (record.leaseOwner) {
+    return "leased";
+  }
+
+  return "pending";
 }
 
 function touchNode(nodeId: string): void {
