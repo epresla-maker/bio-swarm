@@ -104,11 +104,85 @@ test("GET /nodes/:id returns node snapshot", async (t) => {
   assert.equal(current.json().active, true);
   assert.equal(current.json().stats.nodeId, "node-snapshot");
   assert.equal(current.json().capabilities.charging, true);
+  assert.equal(current.json().control.mode, "enabled");
 
   now += 61_000;
   const stale = await app.inject({ method: "GET", url: "/nodes/node-snapshot" });
   assert.equal(stale.statusCode, 200);
   assert.equal(stale.json().active, false);
+});
+
+test("node operator controls block claims until re-enabled", async (t) => {
+  const app = buildApp({ adminApiKey: "node-ops-key" });
+  t.after(() => app.close());
+
+  await app.inject({ method: "POST", url: "/nodes/node-policy/heartbeat", payload: {} });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "node-ops-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "policy-1" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+
+  const unauthorizedDisable = await app.inject({ method: "POST", url: "/nodes/node-policy/disable" });
+  assert.equal(unauthorizedDisable.statusCode, 401);
+
+  const disabled = await app.inject({
+    method: "POST",
+    url: "/nodes/node-policy/disable",
+    headers: { "x-admin-key": "node-ops-key" },
+    payload: { reason: "manual_hold" }
+  });
+  assert.equal(disabled.statusCode, 200);
+  assert.equal(disabled.json().control.mode, "disabled");
+  assert.equal(disabled.json().control.reason, "manual_hold");
+
+  const disabledClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-policy" });
+  assert.equal(disabledClaim.statusCode, 204);
+
+  const quarantined = await app.inject({
+    method: "POST",
+    url: "/nodes/node-policy/quarantine",
+    headers: { "x-admin-key": "node-ops-key" },
+    payload: { reason: "suspicious_scores" }
+  });
+  assert.equal(quarantined.statusCode, 200);
+  assert.equal(quarantined.json().control.mode, "quarantined");
+
+  const quarantinedClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-policy" });
+  assert.equal(quarantinedClaim.statusCode, 204);
+
+  const enabled = await app.inject({
+    method: "POST",
+    url: "/nodes/node-policy/enable",
+    headers: { "x-admin-key": "node-ops-key" }
+  });
+  assert.equal(enabled.statusCode, 200);
+  assert.equal(enabled.json().control.mode, "enabled");
+  assert.equal(enabled.json().control.reason, null);
+
+  const claim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-policy" });
+  assert.equal(claim.statusCode, 200);
+
+  const snapshot = await app.inject({ method: "GET", url: "/nodes/node-policy" });
+  assert.equal(snapshot.statusCode, 200);
+  assert.equal(snapshot.json().control.mode, "enabled");
+
+  const audit = await app.inject({
+    method: "GET",
+    url: "/nodes/node-policy/audit?limit=10",
+    headers: { "x-admin-key": "node-ops-key" }
+  });
+  assert.equal(audit.statusCode, 200);
+  assert.ok(audit.json().items.some((item: { eventType: string }) => item.eventType === "node_disabled"));
+  assert.ok(audit.json().items.some((item: { eventType: string }) => item.eventType === "node_quarantined"));
+  assert.ok(audit.json().items.some((item: { eventType: string }) => item.eventType === "node_enabled"));
 });
 
 test("GET /nodes/:id/audit returns node-specific audit history", async (t) => {
@@ -1068,6 +1142,9 @@ test("admin status endpoint returns audit persistence status", async (t) => {
   assert.equal(authorized.json().tasks.completed, 1);
   assert.equal(typeof authorized.json().nodes.total, "number");
   assert.equal(authorized.json().nodes.active, 1);
+  assert.equal(typeof authorized.json().nodes.enabled, "number");
+  assert.equal(typeof authorized.json().nodes.disabled, "number");
+  assert.equal(typeof authorized.json().nodes.quarantined, "number");
   assert.ok(Array.isArray(authorized.json().recentVerdicts));
   assert.ok(authorized.json().recentVerdicts.length >= 1);
   assert.ok(Array.isArray(authorized.json().recentAudit));

@@ -150,13 +150,16 @@ The orchestrator performs:
 - `GET /nodes/:id/audit?limit=50&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /nodes/:id/stats`
 - `POST /nodes/:id/heartbeat`
+- `POST /nodes/:id/disable` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `POST /nodes/:id/quarantine` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `POST /nodes/:id/enable` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /telemetry`
 - `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
-- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`)
+- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, includes task/node summaries plus recent verdict and audit samples)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 
-Audit event types include: `task_created`, `task_claimed`, `task_canceled`, `task_deleted`, `task_requeued`, `result_submitted`, `result_rejected`, `heartbeat_received`, `lease_expired`.
+Audit event types include: `task_created`, `task_claimed`, `task_canceled`, `task_deleted`, `task_requeued`, `node_disabled`, `node_enabled`, `node_quarantined`, `result_submitted`, `result_rejected`, `heartbeat_received`, `lease_expired`.
 
 ## Runtime Env Vars
 

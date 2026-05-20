@@ -20,7 +20,8 @@ import {
   getTelemetrySnapshot,
   requeueTask,
   recordHeartbeat,
-  submitResult
+  submitResult,
+  updateNodeControl
 } from "./store.js";
 
 interface AdminRateState {
@@ -48,6 +49,9 @@ export function buildApp(options?: {
     "task_canceled",
     "task_deleted",
     "task_requeued",
+    "node_disabled",
+    "node_enabled",
+    "node_quarantined",
     "result_submitted",
     "result_rejected",
     "heartbeat_received",
@@ -134,6 +138,9 @@ export function buildApp(options?: {
         | "task_canceled"
         | "task_deleted"
         | "task_requeued"
+        | "node_disabled"
+        | "node_enabled"
+        | "node_quarantined"
         | "result_submitted"
         | "result_rejected"
         | "heartbeat_received"
@@ -375,6 +382,45 @@ export function buildApp(options?: {
     }
 
     return reply.status(200).send(snapshot);
+  });
+
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>("/nodes/:id/disable", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const verdict = updateNodeControl(request.params.id, "disabled", request.body?.reason);
+    if (!verdict.found) {
+      return reply.status(404).send({ error: "node_not_found" });
+    }
+
+    return reply.status(200).send({ ok: true, control: verdict.control });
+  });
+
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>("/nodes/:id/quarantine", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const verdict = updateNodeControl(request.params.id, "quarantined", request.body?.reason);
+    if (!verdict.found) {
+      return reply.status(404).send({ error: "node_not_found" });
+    }
+
+    return reply.status(200).send({ ok: true, control: verdict.control });
+  });
+
+  app.post<{ Params: { id: string } }>("/nodes/:id/enable", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const verdict = updateNodeControl(request.params.id, "enabled");
+    if (!verdict.found) {
+      return reply.status(404).send({ error: "node_not_found" });
+    }
+
+    return reply.status(200).send({ ok: true, control: verdict.control });
   });
 
   app.get<{

@@ -41,6 +41,15 @@ export interface NodeSnapshot {
   stats: NodeStats;
   capabilities: NodeCapabilities | null;
   active: boolean;
+  control: NodeControlState;
+}
+
+export type NodeControlMode = "enabled" | "disabled" | "quarantined";
+
+export interface NodeControlState {
+  mode: NodeControlMode;
+  reason: string | null;
+  changedAt: string | null;
 }
 
 export interface TaskVerdictLogEntry {
@@ -68,6 +77,9 @@ export type AuditEventType =
   | "task_canceled"
   | "task_deleted"
   | "task_requeued"
+  | "node_disabled"
+  | "node_enabled"
+  | "node_quarantined"
   | "result_submitted"
   | "result_rejected"
   | "heartbeat_received"
@@ -116,11 +128,15 @@ export interface NodeStatusSummary {
   total: number;
   active: number;
   inactive: number;
+  enabled: number;
+  disabled: number;
+  quarantined: number;
 }
 
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
+const nodeControlStates = new Map<string, NodeControlState>();
 
 let leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
 let maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
@@ -162,6 +178,7 @@ export function resetStoreForTests(): void {
   tasks.clear();
   nodeStats.clear();
   nodeCapabilities.clear();
+  nodeControlStates.clear();
   retryCount = 0;
   expiredLeaseCount = 0;
   taskVerdicts.length = 0;
@@ -267,6 +284,10 @@ export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
 
 export function claimTask(nodeId: string): SwarmTask | null {
   sweepExpiredLeases();
+
+  if (!isNodeClaimEnabled(nodeId)) {
+    return null;
+  }
 
   for (const record of tasks.values()) {
     if (record.completed || record.failed) {
@@ -610,18 +631,59 @@ export function getTaskStatusSummary(): TaskStatusSummary {
 
 export function getNodeStatusSummary(): NodeStatusSummary {
   let active = 0;
+  let enabled = 0;
+  let disabled = 0;
+  let quarantined = 0;
 
   for (const stats of nodeStats.values()) {
     if (isNodeActive(stats)) {
       active += 1;
+    }
+
+    const control = getNodeControlState(stats.nodeId);
+    if (control.mode === "disabled") {
+      disabled += 1;
+    } else if (control.mode === "quarantined") {
+      quarantined += 1;
+    } else {
+      enabled += 1;
     }
   }
 
   return {
     total: nodeStats.size,
     active,
-    inactive: Math.max(0, nodeStats.size - active)
+    inactive: Math.max(0, nodeStats.size - active),
+    enabled,
+    disabled,
+    quarantined
   };
+}
+
+export function updateNodeControl(
+  nodeId: string,
+  mode: NodeControlMode,
+  reason?: string
+): { found: boolean; control: NodeControlState | null } {
+  if (!nodeStats.has(nodeId)) {
+    return { found: false, control: null };
+  }
+
+  const control: NodeControlState = {
+    mode,
+    reason: typeof reason === "string" && reason.trim().length > 0 ? reason.trim() : null,
+    changedAt: new Date(nowProvider()).toISOString()
+  };
+  nodeControlStates.set(nodeId, control);
+
+  pushAuditEvent({
+    eventType:
+      mode === "disabled" ? "node_disabled" : mode === "quarantined" ? "node_quarantined" : "node_enabled",
+    nodeId,
+    details: control.reason ? { reason: control.reason } : undefined
+  });
+
+  return { found: true, control };
 }
 
 export function getNodeStats(nodeId: string): NodeStats {
@@ -672,7 +734,8 @@ export function getNodeSnapshot(nodeId: string): NodeSnapshot | null {
   return {
     stats,
     capabilities: nodeCapabilities.get(nodeId) ?? null,
-    active: isNodeActive(stats)
+    active: isNodeActive(stats),
+    control: getNodeControlState(nodeId)
   };
 }
 
@@ -755,6 +818,22 @@ function isNodeActive(stats: NodeStats): boolean {
   }
 
   return nowProvider() - new Date(stats.lastSeenAt).getTime() <= 60_000;
+}
+
+function isNodeClaimEnabled(nodeId: string): boolean {
+  return getNodeControlState(nodeId).mode === "enabled";
+}
+
+function getNodeControlState(nodeId: string): NodeControlState {
+  if (!nodeControlStates.has(nodeId)) {
+    nodeControlStates.set(nodeId, {
+      mode: "enabled",
+      reason: null,
+      changedAt: null
+    });
+  }
+
+  return nodeControlStates.get(nodeId)!;
 }
 
 function touchNode(nodeId: string): void {
