@@ -144,6 +144,10 @@ export function buildApp(options?: {
   });
 
   app.post<{ Body: Pick<SwarmTask, "kind" | "payload" | "quorum"> }>("/tasks", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
     const { kind, payload, quorum } = request.body;
 
     if (!kind || typeof quorum !== "number" || quorum < 1) {

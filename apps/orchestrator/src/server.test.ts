@@ -112,12 +112,24 @@ test("GET /nodes/:id returns node snapshot", async (t) => {
 });
 
 test("task can be created, claimed and completed", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
+
+  const unauthorizedCreate = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "CCO" },
+      quorum: 1
+    }
+  });
+  assert.equal(unauthorizedCreate.statusCode, 401);
 
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CCO" },
@@ -158,6 +170,7 @@ test("POST /tasks/:id/cancel cancels pending task and blocks further claims", as
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "bio_prescreen",
       payload: { sample: "cancel-1" },
@@ -200,6 +213,7 @@ test("canceling completed task returns conflict", async (t) => {
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "COC" },
@@ -238,6 +252,7 @@ test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "bio_prescreen",
       payload: { sample: "requeue-1" },
@@ -295,12 +310,13 @@ test("POST /tasks/:id/requeue reactivates failed task", async (t) => {
 });
 
 test("GET /tasks lists and filters by state", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const completedCreated = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CCO" },
@@ -328,6 +344,7 @@ test("GET /tasks lists and filters by state", async (t) => {
   const pendingCreated = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CCC" },
@@ -358,12 +375,13 @@ test("GET /tasks lists and filters by state", async (t) => {
 });
 
 test("GET /tasks/:id returns lifecycle snapshot", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CCN" },
@@ -409,12 +427,13 @@ test("GET /tasks/:id returns lifecycle snapshot", async (t) => {
 });
 
 test("GET /tasks/:id/results returns submitted results", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CCCl" },
@@ -468,12 +487,13 @@ test("GET /tasks/:id/results returns submitted results", async (t) => {
 });
 
 test("GET /tasks/:id/verdicts returns task-specific verdict history", async (t) => {
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CNO" },
@@ -530,12 +550,13 @@ test("expired lease allows another node to claim same task", async (t) => {
     nowProvider: () => now
   });
 
-  const app = buildApp();
+  const app = buildApp({ adminApiKey: "ops-key" });
   t.after(() => app.close());
 
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
     payload: {
       kind: "bio_prescreen",
       payload: { sample: "case-01" },
@@ -572,6 +593,7 @@ test("admin verdicts endpoint returns recent verdict entries", async (t) => {
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "test-admin-key" },
     payload: {
       kind: "molecule_score",
       payload: { smiles: "CCC" },
@@ -692,6 +714,7 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   const created = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "audit-key" },
     payload: { kind: "bio_prescreen", payload: { sample: "audit" }, quorum: 1 }
   });
   const task = created.json();
@@ -731,6 +754,7 @@ test("admin audit endpoint supports filters and validation", async (t) => {
   const cancelTask = await app.inject({
     method: "POST",
     url: "/tasks",
+    headers: { "x-admin-key": "audit-key" },
     payload: { kind: "bio_prescreen", payload: { sample: "cancel-audit" }, quorum: 1 }
   });
   const cancelTaskId = cancelTask.json().id;
