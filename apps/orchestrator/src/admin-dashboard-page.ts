@@ -86,6 +86,11 @@ export function renderAdminDashboardPage(): string {
 				cursor: pointer;
 			}
 
+			.button.secondary {
+				background: linear-gradient(90deg, #f59e0b, #0ea5e9);
+				color: #132032;
+			}
+
 			.toggle {
 				display: inline-flex;
 				align-items: center;
@@ -164,6 +169,45 @@ export function renderAdminDashboardPage(): string {
 				color: var(--muted);
 			}
 
+			.form-grid {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 8px;
+			}
+
+			.form-grid .input {
+				min-width: 0;
+				background: #fff;
+				color: var(--ink);
+				border-color: var(--line);
+			}
+
+			.form-row {
+				display: flex;
+				gap: 8px;
+				margin-top: 8px;
+				flex-wrap: wrap;
+			}
+
+			.textarea {
+				width: 100%;
+				min-height: 88px;
+				border-radius: 12px;
+				border: 1px solid var(--line);
+				padding: 10px 12px;
+				font: inherit;
+				resize: vertical;
+			}
+
+			.mini-btn {
+				border: 1px solid var(--line);
+				background: #fff;
+				border-radius: 10px;
+				padding: 6px 10px;
+				cursor: pointer;
+				font-weight: 600;
+			}
+
 			.status {
 				margin: 8px 0 12px;
 				min-height: 20px;
@@ -175,6 +219,10 @@ export function renderAdminDashboardPage(): string {
 				.half,
 				.wide {
 					grid-column: span 12;
+				}
+
+				.form-grid {
+					grid-template-columns: 1fr;
 				}
 			}
 		</style>
@@ -220,6 +268,35 @@ export function renderAdminDashboardPage(): string {
 					<h3>Recent Audit</h3>
 					<div id="recentAudit"></div>
 				</article>
+
+				<article class="card wide">
+					<h3>Research Experiments</h3>
+					<div class="form-grid">
+						<input id="expName" class="input" placeholder="Experiment name" value="Mutation Sweep" />
+						<input id="expModel" class="input" placeholder="Model version" value="bio-llm-v1" />
+						<input id="expSteps" class="input" type="number" min="10" value="1200" />
+						<input id="expQuorum" class="input" type="number" min="1" value="1" />
+						<input id="expMutation" class="input" type="number" min="0.001" max="1" step="0.001" value="0.02" />
+						<input id="expPopulation" class="input" type="number" min="32" value="1024" />
+					</div>
+					<div class="form-row">
+						<textarea id="expPrompt" class="textarea" placeholder="Research prompt">Find stable mutation regimes under resource constraints.</textarea>
+					</div>
+					<div class="form-row">
+						<button id="createExperiment" class="button secondary" type="button">Create Experiment</button>
+						<button id="refreshResearch" class="mini-btn" type="button">Refresh Research</button>
+					</div>
+				</article>
+
+				<article class="card half">
+					<h3>Experiment Queue</h3>
+					<div id="researchList"></div>
+				</article>
+
+				<article class="card half">
+					<h3>Experiment Details</h3>
+					<div id="researchDetails" class="mono">Select an experiment to inspect.</div>
+				</article>
 			</section>
 		</main>
 
@@ -233,10 +310,22 @@ export function renderAdminDashboardPage(): string {
 				nodeSummary: document.getElementById("nodeSummary"),
 				attentionTasks: document.getElementById("attentionTasks"),
 				attentionNodes: document.getElementById("attentionNodes"),
-				recentAudit: document.getElementById("recentAudit")
+				recentAudit: document.getElementById("recentAudit"),
+				expName: document.getElementById("expName"),
+				expModel: document.getElementById("expModel"),
+				expSteps: document.getElementById("expSteps"),
+				expQuorum: document.getElementById("expQuorum"),
+				expMutation: document.getElementById("expMutation"),
+				expPopulation: document.getElementById("expPopulation"),
+				expPrompt: document.getElementById("expPrompt"),
+				createExperiment: document.getElementById("createExperiment"),
+				refreshResearch: document.getElementById("refreshResearch"),
+				researchList: document.getElementById("researchList"),
+				researchDetails: document.getElementById("researchDetails")
 			};
 
 			let autoRefreshTimer = null;
+			let selectedExperimentId = null;
 
 			function row(label, value, badgeClass) {
 				const badge = badgeClass ? '<span class="badge ' + badgeClass + '">' + value + '</span>' : String(value);
@@ -306,6 +395,147 @@ export function renderAdminDashboardPage(): string {
 					: '<div class="mono">No audit entries.</div>';
 			}
 
+			function toNumber(value, fallback) {
+				const n = Number(value);
+				if (!Number.isFinite(n)) return fallback;
+				return n;
+			}
+
+			function renderResearchList(items) {
+				if (!items.length) {
+					els.researchList.innerHTML = '<div class="mono">No experiments yet.</div>';
+					return;
+				}
+
+				els.researchList.innerHTML = items
+					.map(
+						(item) =>
+							'<div class="row"><div><strong>' + item.name + '</strong><div class="mono">' +
+							item.experimentId.slice(0, 8) + ' | ' + item.status + ' | best=' +
+							(item.bestScore === null ? 'n/a' : item.bestScore.toFixed(3)) + '</div></div>' +
+							'<button class="mini-btn" data-exp-id="' + item.experimentId + '">Open</button></div>'
+					)
+					.join('');
+
+				els.researchList.querySelectorAll('[data-exp-id]').forEach((button) => {
+					button.addEventListener('click', () => {
+						selectedExperimentId = button.getAttribute('data-exp-id');
+						void loadExperimentDetails();
+					});
+				});
+			}
+
+			function renderResearchDetails(item) {
+				if (!item) {
+					els.researchDetails.innerHTML = 'Select an experiment to inspect.';
+					return;
+				}
+
+				const latest = item.results && item.results.length ? item.results[0] : null;
+				const metrics = latest && latest.payload && latest.payload.metrics ? latest.payload.metrics : null;
+				els.researchDetails.innerHTML = [
+					row('Name', item.name),
+					row('Status', item.status, item.status === 'completed' ? 'ok' : item.status === 'failed' ? 'warn' : ''),
+					row('Model', item.modelVersion),
+					row('Steps', item.steps),
+					row('Mutation', item.mutationRate),
+					row('Population', item.populationSize),
+					row('Best Score', item.bestScore === null ? 'n/a' : item.bestScore.toFixed(3), item.bestScore !== null && item.bestScore > 0.7 ? 'ok' : ''),
+					row('Results', item.resultCount),
+					'<div class="mono">Prompt: ' + item.prompt + '</div>',
+					metrics
+						? '<div class="mono">Metrics: conv=' + Number(metrics.convergence || 0).toFixed(3) +
+							', stability=' + Number(metrics.stability || 0).toFixed(3) + ', diversity=' + Number(metrics.diversityIndex || 0).toFixed(3) + '</div>'
+						: '<div class="mono">Metrics: n/a</div>'
+				].join('');
+			}
+
+			async function loadResearchList() {
+				const key = els.key.value.trim();
+				if (!key) {
+					return;
+				}
+
+				const response = await fetch('/research/experiments?limit=20', {
+					headers: { 'x-admin-key': key }
+				});
+
+				if (!response.ok) {
+					els.researchList.innerHTML = '<div class="mono">Research fetch failed: ' + response.status + '</div>';
+					return;
+				}
+
+				const data = await response.json();
+				renderResearchList(data.items || []);
+			}
+
+			async function loadExperimentDetails() {
+				const key = els.key.value.trim();
+				if (!key || !selectedExperimentId) {
+					return;
+				}
+
+				const response = await fetch('/research/experiments/' + selectedExperimentId, {
+					headers: { 'x-admin-key': key }
+				});
+
+				if (!response.ok) {
+					els.researchDetails.innerHTML = 'Experiment load failed: ' + response.status;
+					return;
+				}
+
+				const item = await response.json();
+				renderResearchDetails(item);
+			}
+
+			async function createExperiment() {
+				const key = els.key.value.trim();
+				if (!key) {
+					els.status.textContent = 'Enter admin API key first.';
+					return;
+				}
+
+				const payload = {
+					name: els.expName.value.trim(),
+					modelVersion: els.expModel.value.trim(),
+					steps: Math.floor(toNumber(els.expSteps.value, 1200)),
+					quorum: Math.floor(toNumber(els.expQuorum.value, 1)),
+					mutationRate: toNumber(els.expMutation.value, 0.02),
+					populationSize: Math.floor(toNumber(els.expPopulation.value, 1024)),
+					prompt: els.expPrompt.value.trim()
+				};
+
+				els.status.textContent = 'Creating experiment...';
+				const response = await fetch('/research/experiments', {
+					method: 'POST',
+					headers: {
+						'content-type': 'application/json',
+						'x-admin-key': key
+					},
+					body: JSON.stringify(payload)
+				});
+
+				if (!response.ok) {
+					const text = await response.text();
+					els.status.textContent = 'Create failed: ' + response.status + ' ' + text;
+					return;
+				}
+
+				const created = await response.json();
+				selectedExperimentId = created.experimentId;
+				els.status.textContent = 'Experiment created: ' + created.experimentId.slice(0, 8);
+				await loadResearchList();
+				await loadExperimentDetails();
+			}
+
+			async function loadAll() {
+				await loadDashboard();
+				await loadResearchList();
+				if (selectedExperimentId) {
+					await loadExperimentDetails();
+				}
+			}
+
 			async function loadDashboard() {
 				const key = els.key.value.trim();
 				if (!key) {
@@ -352,7 +582,7 @@ export function renderAdminDashboardPage(): string {
 				localStorage.setItem("bioSwarmAutoRefresh", "on");
 				autoRefreshTimer = setInterval(() => {
 					if (els.key.value.trim()) {
-						loadDashboard();
+						void loadAll();
 					}
 				}, 5000);
 			}
@@ -366,17 +596,28 @@ export function renderAdminDashboardPage(): string {
 				els.autoRefresh.checked = false;
 			}
 
-			els.refresh.addEventListener("click", loadDashboard);
+			els.refresh.addEventListener("click", () => {
+				void loadAll();
+			});
+			els.refreshResearch.addEventListener("click", () => {
+				void loadResearchList();
+				if (selectedExperimentId) {
+					void loadExperimentDetails();
+				}
+			});
+			els.createExperiment.addEventListener("click", () => {
+				void createExperiment();
+			});
 			els.autoRefresh.addEventListener("change", syncAutoRefresh);
 			els.key.addEventListener("keydown", (event) => {
 				if (event.key === "Enter") {
-					loadDashboard();
+					void loadAll();
 				}
 			});
 
 			syncAutoRefresh();
 			if (els.key.value.trim()) {
-				loadDashboard();
+				void loadAll();
 			}
 		</script>
 	</body>
