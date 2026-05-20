@@ -198,6 +198,58 @@ test("node operator controls block claims until re-enabled", async (t) => {
   assert.ok(audit.json().items.some((item: { eventType: string }) => item.eventType === "node_enabled"));
 });
 
+test("node is automatically quarantined after repeated rejected results", async (t) => {
+  configureStoreRuntime({ autoQuarantineMinRejected: 3 });
+  const app = buildApp({ adminApiKey: "auto-quarantine-key" });
+  t.after(() => app.close());
+
+  await app.inject({ method: "POST", url: "/nodes/node-auto/heartbeat", payload: {} });
+
+  for (let index = 0; index < 3; index += 1) {
+    const rejected = await app.inject({
+      method: "POST",
+      url: `/tasks/missing-${index}/result`,
+      payload: {
+        nodeId: "node-auto",
+        checksum: `bad-${index}`,
+        score: 0.1,
+        payload: {}
+      }
+    });
+    assert.equal(rejected.statusCode, 409);
+    assert.equal(rejected.json().reason, "task_not_found");
+  }
+
+  const snapshot = await app.inject({ method: "GET", url: "/nodes/node-auto" });
+  assert.equal(snapshot.statusCode, 200);
+  assert.equal(snapshot.json().stats.rejected, 3);
+  assert.equal(snapshot.json().control.mode, "quarantined");
+  assert.equal(snapshot.json().control.reason, "auto_rejection_threshold");
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "auto-quarantine-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "blocked-after-auto-quarantine" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+
+  const claim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-auto" });
+  assert.equal(claim.statusCode, 204);
+
+  const audit = await app.inject({
+    method: "GET",
+    url: "/nodes/node-auto/audit?limit=10",
+    headers: { "x-admin-key": "auto-quarantine-key" }
+  });
+  assert.equal(audit.statusCode, 200);
+  assert.ok(audit.json().items.some((item: { eventType: string; details?: { reason?: string } }) => item.eventType === "node_quarantined" && item.details?.reason === "auto_rejection_threshold"));
+});
+
 test("GET /nodes/:id/audit returns node-specific audit history", async (t) => {
   let now = 25_000;
   configureStoreRuntime({ nowProvider: () => now });

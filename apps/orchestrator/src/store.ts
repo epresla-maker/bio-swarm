@@ -168,6 +168,7 @@ const nodeControlStates = new Map<string, NodeControlState>();
 
 let leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
 let maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
+let autoQuarantineMinRejected = Number(process.env.AUTO_QUARANTINE_MIN_REJECTED ?? 3);
 let nowProvider: () => number = () => Date.now();
 
 let retryCount = 0;
@@ -187,6 +188,7 @@ let lastAuditError: string | null = null;
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
   maxAttempts?: number;
+  autoQuarantineMinRejected?: number;
   nowProvider?: () => number;
 }): void {
   if (typeof options.leaseTtlMs === "number" && Number.isFinite(options.leaseTtlMs) && options.leaseTtlMs > 0) {
@@ -195,6 +197,14 @@ export function configureStoreRuntime(options: {
 
   if (typeof options.maxAttempts === "number" && Number.isFinite(options.maxAttempts) && options.maxAttempts > 0) {
     maxAttempts = options.maxAttempts;
+  }
+
+  if (
+    typeof options.autoQuarantineMinRejected === "number" &&
+    Number.isFinite(options.autoQuarantineMinRejected) &&
+    options.autoQuarantineMinRejected > 0
+  ) {
+    autoQuarantineMinRejected = Math.floor(options.autoQuarantineMinRejected);
   }
 
   if (options.nowProvider) {
@@ -220,6 +230,7 @@ export function resetStoreForTests(): void {
   lastAuditError = null;
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
+  autoQuarantineMinRejected = Number(process.env.AUTO_QUARANTINE_MIN_REJECTED ?? 3);
   nowProvider = () => Date.now();
 }
 
@@ -997,6 +1008,27 @@ function incrementNode(nodeId: string, accepted: boolean): void {
     stats.rejected += 1;
   }
   stats.lastSeenAt = new Date(nowProvider()).toISOString();
+
+  if (!accepted) {
+    maybeAutoQuarantineNode(nodeId, stats);
+  }
+}
+
+function maybeAutoQuarantineNode(nodeId: string, stats: NodeStats): void {
+  const control = getNodeControlState(nodeId);
+  if (control.mode !== "enabled") {
+    return;
+  }
+
+  if (stats.rejected < autoQuarantineMinRejected) {
+    return;
+  }
+
+  if (stats.rejected <= stats.accepted) {
+    return;
+  }
+
+  updateNodeControl(nodeId, "quarantined", "auto_rejection_threshold");
 }
 
 function pushVerdict(taskId: string, nodeId: string, accepted: boolean, reason: string | null): void {
