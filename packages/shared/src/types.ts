@@ -2,7 +2,8 @@ export type TaskKind =
   | "molecule_score"
   | "embedding_generate"
   | "bio_prescreen"
-  | "hypothesis_rank";
+  | "hypothesis_rank"
+  | "bio_simulation";
 
 export interface SwarmTask {
   id: string;

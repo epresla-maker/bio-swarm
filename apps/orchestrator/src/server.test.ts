@@ -1381,3 +1381,101 @@ test("admin dashboard ui endpoint serves html shell", async (t) => {
   assert.match(response.body, /Bio Swarm Operator Console/);
   assert.match(response.body, /\/admin\/dashboard/);
 });
+
+test("research experiments API creates, lists and reads details", async (t) => {
+  const app = buildApp({ adminApiKey: "research-key" });
+  t.after(() => app.close());
+
+  const unauthorized = await app.inject({
+    method: "POST",
+    url: "/research/experiments",
+    payload: {
+      name: "Unauthorized",
+      modelVersion: "bio-llm-v1",
+      steps: 100,
+      quorum: 1,
+      prompt: "test"
+    }
+  });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const invalid = await app.inject({
+    method: "POST",
+    url: "/research/experiments",
+    headers: { "x-admin-key": "research-key" },
+    payload: {
+      name: "",
+      modelVersion: "bio-llm-v1",
+      steps: 5,
+      quorum: 0,
+      prompt: ""
+    }
+  });
+  assert.equal(invalid.statusCode, 400);
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/research/experiments",
+    headers: { "x-admin-key": "research-key" },
+    payload: {
+      name: "Mutation Sweep A",
+      modelVersion: "bio-llm-v1",
+      steps: 1200,
+      quorum: 1,
+      mutationRate: 0.02,
+      populationSize: 1024,
+      prompt: "Find stable mutation regimes"
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  assert.equal(typeof created.json().experimentId, "string");
+  assert.equal(typeof created.json().taskId, "string");
+
+  const task = await app.inject({ method: "GET", url: `/tasks/${created.json().taskId}` });
+  assert.equal(task.statusCode, 200);
+  assert.equal(task.json().task.kind, "bio_simulation");
+
+  const listed = await app.inject({
+    method: "GET",
+    url: "/research/experiments?limit=10",
+    headers: { "x-admin-key": "research-key" }
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.ok(listed.json().items.length >= 1);
+  assert.equal(listed.json().items[0].experimentId, created.json().experimentId);
+  assert.equal(listed.json().items[0].status, "queued");
+
+  const claimed = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=research-node-1" });
+  assert.equal(claimed.statusCode, 200);
+  assert.equal(claimed.json().id, created.json().taskId);
+
+  const submitted = await app.inject({
+    method: "POST",
+    url: `/tasks/${created.json().taskId}/result`,
+    payload: {
+      nodeId: "research-node-1",
+      checksum: "research-ok-1",
+      score: 0.83,
+      payload: { score: 0.83, metrics: { convergence: 0.81 } }
+    }
+  });
+  assert.equal(submitted.statusCode, 202);
+
+  const details = await app.inject({
+    method: "GET",
+    url: `/research/experiments/${created.json().experimentId}`,
+    headers: { "x-admin-key": "research-key" }
+  });
+  assert.equal(details.statusCode, 200);
+  assert.equal(details.json().status, "completed");
+  assert.equal(details.json().resultCount, 1);
+  assert.equal(details.json().bestScore, 0.83);
+  assert.equal(details.json().results.length, 1);
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/research/experiments/not-found",
+    headers: { "x-admin-key": "research-key" }
+  });
+  assert.equal(missing.statusCode, 404);
+});

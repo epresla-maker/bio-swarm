@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import crypto from "node:crypto";
 import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
 import {
   addTask,
@@ -29,6 +30,32 @@ import { renderAdminDashboardPage } from "./admin-dashboard-page.js";
 interface AdminRateState {
   windowStartMs: number;
   count: number;
+}
+
+interface ResearchExperimentPayload {
+  experimentId: string;
+  name: string;
+  modelVersion: string;
+  steps: number;
+  mutationRate: number;
+  populationSize: number;
+  prompt: string;
+}
+
+interface ResearchExperimentView {
+  experimentId: string;
+  taskId: string;
+  name: string;
+  modelVersion: string;
+  steps: number;
+  mutationRate: number;
+  populationSize: number;
+  prompt: string;
+  status: "queued" | "running" | "completed" | "failed";
+  createdAt: string;
+  quorum: number;
+  resultCount: number;
+  bestScore: number | null;
 }
 
 export function buildApp(options?: {
@@ -153,6 +180,91 @@ export function buildApp(options?: {
     };
   }
 
+  function getResearchExperimentPayload(task: SwarmTask): ResearchExperimentPayload | null {
+    if (task.kind !== "bio_simulation") {
+      return null;
+    }
+
+    const payload = task.payload;
+    const experimentId = payload.experimentId;
+    const name = payload.name;
+    const modelVersion = payload.modelVersion;
+    const steps = payload.steps;
+    const mutationRate = payload.mutationRate;
+    const populationSize = payload.populationSize;
+    const prompt = payload.prompt;
+
+    if (
+      typeof experimentId !== "string" ||
+      typeof name !== "string" ||
+      typeof modelVersion !== "string" ||
+      typeof steps !== "number" ||
+      typeof mutationRate !== "number" ||
+      typeof populationSize !== "number" ||
+      typeof prompt !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      experimentId,
+      name,
+      modelVersion,
+      steps,
+      mutationRate,
+      populationSize,
+      prompt
+    };
+  }
+
+  function mapTaskStateToExperimentStatus(state: "pending" | "leased" | "completed" | "failed") {
+    if (state === "pending") {
+      return "queued" as const;
+    }
+
+    if (state === "leased") {
+      return "running" as const;
+    }
+
+    return state;
+  }
+
+  function getResearchExperimentViews(limit: number): ResearchExperimentView[] {
+    const snapshots = listTaskSnapshots({ limit: 500, state: undefined });
+    const views: ResearchExperimentView[] = [];
+
+    for (const snapshot of snapshots) {
+      const payload = getResearchExperimentPayload(snapshot.task);
+      if (!payload) {
+        continue;
+      }
+
+      const results = listTaskResults({ taskId: snapshot.task.id, limit: 200 });
+      const bestScore =
+        results.items.length > 0
+          ? results.items.reduce((max, item) => (item.score > max ? item.score : max), Number.NEGATIVE_INFINITY)
+          : null;
+
+      views.push({
+        experimentId: payload.experimentId,
+        taskId: snapshot.task.id,
+        name: payload.name,
+        modelVersion: payload.modelVersion,
+        steps: payload.steps,
+        mutationRate: payload.mutationRate,
+        populationSize: payload.populationSize,
+        prompt: payload.prompt,
+        status: mapTaskStateToExperimentStatus(snapshot.state),
+        createdAt: snapshot.task.createdAt,
+        quorum: snapshot.task.quorum,
+        resultCount: snapshot.resultCount,
+        bestScore
+      });
+    }
+
+    return views.slice(0, limit);
+  }
+
   app.get("/health", async () => {
     return { ok: true };
   });
@@ -170,6 +282,106 @@ export function buildApp(options?: {
 
     const task = addTask({ kind, payload: payload ?? {}, quorum });
     return reply.status(201).send(task);
+  });
+
+  app.post<{
+    Body: {
+      name?: string;
+      modelVersion?: string;
+      steps?: number;
+      quorum?: number;
+      mutationRate?: number;
+      populationSize?: number;
+      prompt?: string;
+    };
+  }>("/research/experiments", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const name = request.body.name?.trim();
+    const modelVersion = request.body.modelVersion?.trim();
+    const prompt = request.body.prompt?.trim();
+    const steps = request.body.steps;
+    const quorum = request.body.quorum;
+    const mutationRate = request.body.mutationRate ?? 0.015;
+    const populationSize = request.body.populationSize ?? 512;
+
+    if (!name || !modelVersion || !prompt) {
+      return reply.status(400).send({ error: "invalid_experiment_payload" });
+    }
+
+    if (typeof steps !== "number" || !Number.isFinite(steps) || steps < 10) {
+      return reply.status(400).send({ error: "invalid_steps" });
+    }
+
+    if (typeof quorum !== "number" || !Number.isFinite(quorum) || quorum < 1) {
+      return reply.status(400).send({ error: "invalid_quorum" });
+    }
+
+    if (typeof mutationRate !== "number" || !Number.isFinite(mutationRate) || mutationRate <= 0 || mutationRate > 1) {
+      return reply.status(400).send({ error: "invalid_mutation_rate" });
+    }
+
+    if (
+      typeof populationSize !== "number" ||
+      !Number.isFinite(populationSize) ||
+      populationSize < 32 ||
+      populationSize > 1_000_000
+    ) {
+      return reply.status(400).send({ error: "invalid_population_size" });
+    }
+
+    const experimentId = crypto.randomUUID();
+    const task = addTask({
+      kind: "bio_simulation",
+      quorum,
+      payload: {
+        experimentId,
+        name,
+        modelVersion,
+        steps: Math.floor(steps),
+        mutationRate,
+        populationSize: Math.floor(populationSize),
+        prompt
+      }
+    });
+
+    return reply.status(201).send({
+      experimentId,
+      taskId: task.id,
+      status: "queued"
+    });
+  });
+
+  app.get<{ Querystring: { limit?: string } }>("/research/experiments", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const parsedLimit = request.query.limit ? Number(request.query.limit) : 25;
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+      return reply.status(400).send({ error: "invalid_limit" });
+    }
+
+    return reply.status(200).send({ items: getResearchExperimentViews(Math.floor(parsedLimit)) });
+  });
+
+  app.get<{ Params: { id: string } }>("/research/experiments/:id", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const view = getResearchExperimentViews(500).find((item) => item.experimentId === request.params.id);
+    if (!view) {
+      return reply.status(404).send({ error: "experiment_not_found" });
+    }
+
+    const results = listTaskResults({ taskId: view.taskId, limit: 200 });
+    return reply.status(200).send({
+      ...view,
+      results: results.items
+    });
   });
 
   app.get<{ Querystring: { state?: string; limit?: string } }>("/tasks", async (request, reply) => {

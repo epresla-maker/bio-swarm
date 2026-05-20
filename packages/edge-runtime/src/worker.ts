@@ -39,22 +39,34 @@ export function canProcess(input: NodeCapabilities): boolean {
 
 export function processTask(task: SwarmTask, nodeId: string): Omit<TaskResult, "taskId" | "submittedAt"> {
   let score = 0;
+  let payload: Record<string, unknown> = {};
 
   switch (task.kind) {
     case "molecule_score":
       score = mockMoleculeScore(task.payload);
+      payload = { score };
       break;
     case "embedding_generate":
       score = mockEmbeddingScore(task.payload);
+      payload = { score };
       break;
     case "bio_prescreen":
       score = 0.6;
+      payload = { score };
       break;
     case "hypothesis_rank":
       score = 0.7;
+      payload = { score };
       break;
+    case "bio_simulation": {
+      const simulation = mockBioSimulation(task.payload);
+      score = simulation.score;
+      payload = simulation;
+      break;
+    }
     default:
       score = 0.5;
+      payload = { score };
   }
 
   const checksum = crypto.createHash("sha256").update(JSON.stringify({ task, score })).digest("hex");
@@ -63,7 +75,7 @@ export function processTask(task: SwarmTask, nodeId: string): Omit<TaskResult, "
     nodeId,
     checksum,
     score,
-    payload: { score }
+    payload
   };
 }
 
@@ -183,6 +195,36 @@ function mockMoleculeScore(payload: Record<string, unknown>): number {
 function mockEmbeddingScore(payload: Record<string, unknown>): number {
   const text = String(payload.text ?? "biomedical");
   return Math.min(0.99, text.length / 100);
+}
+
+function mockBioSimulation(payload: Record<string, unknown>): Record<string, unknown> & { score: number } {
+  const steps = typeof payload.steps === "number" ? payload.steps : 100;
+  const mutationRate = typeof payload.mutationRate === "number" ? payload.mutationRate : 0.015;
+  const populationSize = typeof payload.populationSize === "number" ? payload.populationSize : 512;
+  const prompt = String(payload.prompt ?? "baseline");
+  const modelVersion = String(payload.modelVersion ?? "bio-llm-mini");
+
+  const stability = Math.max(0.1, 1 - Math.abs(mutationRate - 0.02) * 12);
+  const scale = Math.min(1, Math.log10(Math.max(populationSize, 10)) / 4);
+  const stepFactor = Math.min(1, steps / 5000);
+  const promptFactor = Math.min(1, prompt.length / 240);
+  const modelFactor = Math.min(1, modelVersion.length / 24);
+  const score = Math.min(0.99, Math.max(0.2, (stability + scale + stepFactor + promptFactor + modelFactor) / 5));
+
+  return {
+    score,
+    metrics: {
+      stability,
+      convergence: (stepFactor + scale) / 2,
+      diversityIndex: Math.max(0, Math.min(1, mutationRate * 10))
+    },
+    summary: {
+      steps,
+      mutationRate,
+      populationSize,
+      modelVersion
+    }
+  };
 }
 
 function wait(ms: number): Promise<void> {
