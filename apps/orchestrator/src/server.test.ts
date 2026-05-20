@@ -1378,7 +1378,7 @@ test("admin dashboard ui endpoint serves html shell", async (t) => {
   const response = await app.inject({ method: "GET", url: "/admin/dashboard/ui" });
   assert.equal(response.statusCode, 200);
   assert.match(response.headers["content-type"] ?? "", /text\/html/);
-  assert.match(response.body, /Bio Swarm Operatori Konzol/);
+  assert.match(response.body, /Bio Swarm Operator Console/);
   assert.match(response.body, /\/admin\/dashboard/);
 });
 

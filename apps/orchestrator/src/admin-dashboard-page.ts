@@ -4,7 +4,7 @@ export function renderAdminDashboardPage(): string {
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width,initial-scale=1" />
-		<title>Bio Swarm Admin Vezerlopult</title>
+		<title>Bio Swarm Operator Console</title>
 		<style>
 			:root {
 				--bg-0: #061423;
@@ -255,7 +255,7 @@ export function renderAdminDashboardPage(): string {
 		<main class="wrap">
 			<section class="hero">
 				<div>
-					<h1 class="title">Bio Swarm Operatori Konzol</h1>
+					<h1 class="title">Bio Swarm Operator Console</h1>
 					<p class="subtitle">Elo figyelmi nezet a /admin/dashboard vegpontrol</p>
 				</div>
 				<div class="controls">
