@@ -834,7 +834,7 @@ export function renderAdminDashboardPage(): string {
 
 			function toCsvCell(value) {
 				const raw = value === null || value === undefined ? '' : String(value);
-				if (raw.includes(',') || raw.includes('"') || raw.includes('\n')) {
+				if (raw.includes(',') || raw.includes('"') || raw.includes('\\n')) {
 					return '"' + raw.replace(/"/g, '""') + '"';
 				}
 				return raw;
@@ -866,7 +866,7 @@ export function renderAdminDashboardPage(): string {
 				]);
 				const csv = [header, ...rows]
 					.map((line) => line.map((cell) => toCsvCell(cell)).join(','))
-					.join('\n');
+					.join('\\n');
 				downloadTextFile('compare-' + stamp + '.csv', 'text/csv;charset=utf-8', csv);
 				els.status.textContent = t('csvExportDone');
 			}
