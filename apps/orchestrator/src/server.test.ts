@@ -293,6 +293,65 @@ test("GET /tasks/:id returns lifecycle snapshot", async (t) => {
   assert.equal(missing.statusCode, 404);
 });
 
+test("GET /tasks/:id/results returns submitted results", async (t) => {
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "CCCl" },
+      quorum: 2
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  const task = created.json();
+
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-rs-1" });
+  const first = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-rs-1",
+      checksum: "rs-1",
+      score: 0.61,
+      payload: { tag: "first" }
+    }
+  });
+  assert.equal(first.statusCode, 202);
+
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-rs-2" });
+  const second = await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-rs-2",
+      checksum: "rs-2",
+      score: 0.73,
+      payload: { tag: "second" }
+    }
+  });
+  assert.equal(second.statusCode, 202);
+
+  const listed = await app.inject({ method: "GET", url: `/tasks/${task.id}/results?limit=10` });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().items.length, 2);
+  assert.equal(listed.json().items[0].nodeId, "node-rs-2");
+
+  const bounded = await app.inject({ method: "GET", url: `/tasks/${task.id}/results?limit=1` });
+  assert.equal(bounded.statusCode, 200);
+  assert.equal(bounded.json().items.length, 1);
+  assert.equal(bounded.json().items[0].nodeId, "node-rs-2");
+
+  const missing = await app.inject({ method: "GET", url: "/tasks/not-found/results" });
+  assert.equal(missing.statusCode, 404);
+
+  const invalidLimit = await app.inject({ method: "GET", url: `/tasks/${task.id}/results?limit=0` });
+  assert.equal(invalidLimit.statusCode, 400);
+});
+
 test("expired lease allows another node to claim same task", async (t) => {
   let now = 1_000;
   configureStoreRuntime({

@@ -27,6 +27,11 @@ export interface TaskListQuery {
   state?: TaskSnapshot["state"];
 }
 
+export interface TaskResultsQuery {
+  taskId: string;
+  limit: number;
+}
+
 export interface NodeListQuery {
   limit: number;
   activeOnly?: boolean;
@@ -581,6 +586,21 @@ export function getTaskSnapshot(taskId: string): TaskSnapshot | null {
     resultCount: record.results.length,
     leaseOwner: record.leaseOwner,
     leaseExpiresAt: record.leaseExpiresAt === null ? null : new Date(record.leaseExpiresAt).toISOString()
+  };
+}
+
+export function listTaskResults(query: TaskResultsQuery): { found: boolean; items: TaskResult[] } {
+  sweepExpiredLeases();
+
+  const record = tasks.get(query.taskId);
+  if (!record) {
+    return { found: false, items: [] };
+  }
+
+  const bounded = Math.max(1, Math.min(200, Math.floor(query.limit)));
+  return {
+    found: true,
+    items: record.results.slice(-bounded).reverse()
   };
 }
 
