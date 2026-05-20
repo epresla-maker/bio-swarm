@@ -222,6 +222,12 @@ export function renderAdminDashboardPage(): string {
 				background: linear-gradient(180deg, #ffffff, #f5fbff);
 			}
 
+			.compare-grid {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 8px;
+			}
+
 			.status {
 				margin: 8px 0 12px;
 				min-height: 20px;
@@ -236,6 +242,10 @@ export function renderAdminDashboardPage(): string {
 				}
 
 				.form-grid {
+					grid-template-columns: 1fr;
+				}
+
+				.compare-grid {
 					grid-template-columns: 1fr;
 				}
 			}
@@ -316,6 +326,18 @@ export function renderAdminDashboardPage(): string {
 					<h3>Research Trend (Best Score)</h3>
 					<div id="researchTrend" class="trend-wrap mono">No completed experiments yet.</div>
 				</article>
+
+				<article class="card wide">
+					<h3>Experiment Compare (A/B)</h3>
+					<div class="compare-grid">
+						<select id="compareA" class="input"></select>
+						<select id="compareB" class="input"></select>
+					</div>
+					<div class="form-row">
+						<button id="runCompare" class="mini-btn" type="button">Compare</button>
+					</div>
+					<div id="compareResult" class="mono">Choose two experiments and click Compare.</div>
+				</article>
 			</section>
 		</main>
 
@@ -341,12 +363,18 @@ export function renderAdminDashboardPage(): string {
 				refreshResearch: document.getElementById("refreshResearch"),
 				researchList: document.getElementById("researchList"),
 				researchDetails: document.getElementById("researchDetails"),
-				researchTrend: document.getElementById("researchTrend")
+				researchTrend: document.getElementById("researchTrend"),
+				compareA: document.getElementById("compareA"),
+				compareB: document.getElementById("compareB"),
+				runCompare: document.getElementById("runCompare"),
+				compareResult: document.getElementById("compareResult")
 			};
 
 			let autoRefreshTimer = null;
 			let selectedExperimentId = null;
 			let researchItems = [];
+			let compareAId = null;
+			let compareBId = null;
 
 			function row(label, value, badgeClass) {
 				const badge = badgeClass ? '<span class="badge ' + badgeClass + '">' + value + '</span>' : String(value);
@@ -486,6 +514,106 @@ export function renderAdminDashboardPage(): string {
 					'<div>Latest: <strong>' + latest.name + '</strong> | best score=' + latest.bestScore.toFixed(3) + ' | runs=' + points.length + '</div>';
 			}
 
+			function renderCompareSelectors(items) {
+				if (!items.length) {
+					els.compareA.innerHTML = '<option value="">No experiments</option>';
+					els.compareB.innerHTML = '<option value="">No experiments</option>';
+					return;
+				}
+
+				if (!compareAId || !items.some((item) => item.experimentId === compareAId)) {
+					compareAId = items[0].experimentId;
+				}
+
+				if (!compareBId || !items.some((item) => item.experimentId === compareBId)) {
+					compareBId = items[Math.min(1, items.length - 1)].experimentId;
+				}
+
+				const optionsHtml = items
+					.map((item) => '<option value="' + item.experimentId + '">' + item.name + ' (' + item.experimentId.slice(0, 8) + ')</option>')
+					.join('');
+
+				els.compareA.innerHTML = optionsHtml;
+				els.compareB.innerHTML = optionsHtml;
+				els.compareA.value = compareAId;
+				els.compareB.value = compareBId;
+			}
+
+			function metric(item, key) {
+				if (!item || !item.results || !item.results.length) {
+					return null;
+				}
+
+				const latest = item.results[0];
+				if (!latest || !latest.payload || !latest.payload.metrics) {
+					return null;
+				}
+
+				const raw = latest.payload.metrics[key];
+				return typeof raw === 'number' ? raw : null;
+			}
+
+			function renderDelta(label, a, b, higherIsBetter) {
+				const an = typeof a === 'number' ? a : null;
+				const bn = typeof b === 'number' ? b : null;
+				if (an === null || bn === null) {
+					return row(label, 'n/a');
+				}
+
+				const delta = an - bn;
+				let badge = '';
+				if (delta !== 0) {
+					const betterA = higherIsBetter ? delta > 0 : delta < 0;
+					badge = betterA ? 'ok' : 'warn';
+				}
+
+				const value =
+					an.toFixed(3) + ' vs ' + bn.toFixed(3) + ' (Δ ' + (delta >= 0 ? '+' : '') + delta.toFixed(3) + ')';
+				return row(label, value, badge);
+			}
+
+			async function loadExperimentById(experimentId) {
+				const key = els.key.value.trim();
+				if (!key || !experimentId) {
+					return null;
+				}
+
+				const response = await fetch('/research/experiments/' + experimentId, {
+					headers: { 'x-admin-key': key }
+				});
+
+				if (!response.ok) {
+					return null;
+				}
+
+				return await response.json();
+			}
+
+			async function runCompare() {
+				compareAId = els.compareA.value;
+				compareBId = els.compareB.value;
+				if (!compareAId || !compareBId) {
+					els.compareResult.innerHTML = 'Choose two experiments first.';
+					return;
+				}
+
+				const [a, b] = await Promise.all([loadExperimentById(compareAId), loadExperimentById(compareBId)]);
+				if (!a || !b) {
+					els.compareResult.innerHTML = 'Compare fetch failed.';
+					return;
+				}
+
+				els.compareResult.innerHTML = [
+					'<div class="mono"><strong>A:</strong> ' + a.name + ' | <strong>B:</strong> ' + b.name + '</div>',
+					renderDelta('Best Score', a.bestScore, b.bestScore, true),
+					renderDelta('Convergence', metric(a, 'convergence'), metric(b, 'convergence'), true),
+					renderDelta('Stability', metric(a, 'stability'), metric(b, 'stability'), true),
+					renderDelta('Diversity', metric(a, 'diversityIndex'), metric(b, 'diversityIndex'), true),
+					renderDelta('Mutation Rate', a.mutationRate, b.mutationRate, false),
+					renderDelta('Population', a.populationSize, b.populationSize, true)
+				].join('');
+			}
+
 			function renderResearchDetails(item) {
 				if (!item) {
 					els.researchDetails.innerHTML = 'Select an experiment to inspect.';
@@ -530,6 +658,7 @@ export function renderAdminDashboardPage(): string {
 				researchItems = data.items || [];
 				renderResearchList(researchItems);
 				renderResearchTrend(researchItems);
+				renderCompareSelectors(researchItems);
 			}
 
 			async function loadExperimentDetails() {
@@ -671,6 +800,15 @@ export function renderAdminDashboardPage(): string {
 			});
 			els.createExperiment.addEventListener("click", () => {
 				void createExperiment();
+			});
+			els.runCompare.addEventListener('click', () => {
+				void runCompare();
+			});
+			els.compareA.addEventListener('change', () => {
+				compareAId = els.compareA.value;
+			});
+			els.compareB.addEventListener('change', () => {
+				compareBId = els.compareB.value;
 			});
 			els.autoRefresh.addEventListener("change", syncAutoRefresh);
 			els.key.addEventListener("keydown", (event) => {
