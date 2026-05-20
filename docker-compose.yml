@@ -1,0 +1,16 @@
+services:
+  orchestrator:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -lc "corepack enable && pnpm install && pnpm --filter @bio-swarm/orchestrator dev"
+    ports:
+      - "4000:4000"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

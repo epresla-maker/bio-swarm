@@ -1,0 +1,104 @@
+import Fastify from "fastify";
+import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
+import { addTask, claimTask, getNodeStats, getRecentVerdicts, getTelemetrySnapshot, recordHeartbeat, submitResult } from "./store.js";
+
+export function buildApp(options?: { logger?: boolean }) {
+  const app = Fastify({ logger: options?.logger ?? false });
+
+  app.get("/health", async () => {
+    return { ok: true };
+  });
+
+  app.post<{ Body: Pick<SwarmTask, "kind" | "payload" | "quorum"> }>("/tasks", async (request, reply) => {
+    const { kind, payload, quorum } = request.body;
+
+    if (!kind || typeof quorum !== "number" || quorum < 1) {
+      return reply.status(400).send({ error: "invalid_task_payload" });
+    }
+
+    const task = addTask({ kind, payload: payload ?? {}, quorum });
+    return reply.status(201).send(task);
+  });
+
+  app.get<{ Querystring: { nodeId?: string } }>("/tasks/claim", async (request, reply) => {
+    const nodeId = request.query.nodeId;
+    if (!nodeId) {
+      return reply.status(400).send({ error: "missing_node_id" });
+    }
+
+    const task = claimTask(nodeId);
+    if (!task) {
+      return reply.status(204).send();
+    }
+
+    return reply.status(200).send(task);
+  });
+
+  app.post<{ Params: { id: string }; Body: Omit<TaskResult, "taskId" | "submittedAt"> }>(
+    "/tasks/:id/result",
+    async (request, reply) => {
+      const taskId = request.params.id;
+      const { nodeId, checksum, score, payload } = request.body;
+
+      if (!nodeId || !checksum || typeof score !== "number") {
+        return reply.status(400).send({ error: "invalid_result_payload" });
+      }
+
+      const result: TaskResult = {
+        taskId,
+        nodeId,
+        checksum,
+        score,
+        payload: payload ?? {},
+        submittedAt: new Date().toISOString()
+      };
+
+      const verdict = submitResult(result);
+      if (!verdict.accepted) {
+        return reply.status(409).send(verdict);
+      }
+
+      return reply.status(202).send(verdict);
+    }
+  );
+
+  app.get<{ Params: { id: string } }>("/nodes/:id/stats", async (request) => {
+    return getNodeStats(request.params.id);
+  });
+
+  app.post<{ Params: { id: string }; Body: { capabilities?: NodeCapabilities } }>(
+    "/nodes/:id/heartbeat",
+    async (request, reply) => {
+      const nodeId = request.params.id;
+      const capabilities = request.body?.capabilities;
+
+      if (capabilities) {
+        const values = [capabilities.charging, capabilities.wifi, capabilities.idle, capabilities.userOptIn];
+        const valid = values.every((value) => typeof value === "boolean");
+        if (!valid) {
+          return reply.status(400).send({ error: "invalid_capabilities" });
+        }
+      }
+
+      const stats = recordHeartbeat(nodeId, capabilities);
+      return reply.status(200).send({ ok: true, stats });
+    }
+  );
+
+  app.get("/telemetry", async () => {
+    return getTelemetrySnapshot();
+  });
+
+  app.get<{ Querystring: { limit?: string } }>("/admin/verdicts", async (request, reply) => {
+    const rawLimit = request.query.limit;
+    const parsed = rawLimit ? Number(rawLimit) : 20;
+
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return reply.status(400).send({ error: "invalid_limit" });
+    }
+
+    return { items: getRecentVerdicts(parsed) };
+  });
+
+  return app;
+}

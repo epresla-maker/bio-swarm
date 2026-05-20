@@ -1,0 +1,19 @@
+{
+  "name": "bio-swarm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Decentralized biomedical AI swarm MVP",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "smoke": "pnpm --filter @bio-swarm/orchestrator test && pnpm --filter @bio-swarm/edge-runtime test",
+    "smoke:e2e": "bash scripts/smoke-e2e.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.2"
+  }
+}

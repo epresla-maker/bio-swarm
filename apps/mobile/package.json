@@ -1,0 +1,23 @@
+{
+  "name": "@bio-swarm/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry",
+  "scripts": {
+    "dev": "expo start --clear",
+    "build": "echo 'Use EAS build for production iOS artifacts'",
+    "lint": "echo 'No linter configured for mobile yet'",
+    "test": "echo 'No tests yet for mobile'"
+  },
+  "dependencies": {
+    "expo": "~52.0.20",
+    "expo-status-bar": "~2.0.1",
+    "react": "18.3.1",
+    "react-native": "0.76.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/react": "~18.3.12",
+    "@types/react-native": "^0.73.0"
+  }
+}

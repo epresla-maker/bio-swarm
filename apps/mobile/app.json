@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Bio Swarm",
+    "slug": "bio-swarm",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bioswarm.mobile"
+    }
+  }
+}

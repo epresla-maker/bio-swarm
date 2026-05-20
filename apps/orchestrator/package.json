@@ -1,0 +1,20 @@
+{
+  "name": "@bio-swarm/orchestrator",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "lint": "echo 'No linter configured for orchestrator yet'",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@bio-swarm/shared": "workspace:*",
+    "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
