@@ -6,6 +6,7 @@ import {
   claimTask,
   getAuditLog,
   getAuditPersistenceStatus,
+  getTaskVerdicts,
   listTaskResults,
   listNodeStats,
   listTaskSnapshots,
@@ -205,6 +206,21 @@ export function buildApp(options?: {
     }
 
     return reply.status(200).send({ items: result.items });
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>("/tasks/:id/verdicts", async (request, reply) => {
+    const rawLimit = request.query.limit;
+    const parsedLimit = rawLimit ? Number(rawLimit) : 50;
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+      return reply.status(400).send({ error: "invalid_limit" });
+    }
+
+    const verdicts = getTaskVerdicts({ taskId: request.params.id, limit: parsedLimit });
+    if (!verdicts.found) {
+      return reply.status(404).send({ error: "task_not_found" });
+    }
+
+    return reply.status(200).send({ items: verdicts.items });
   });
 
   app.post<{ Params: { id: string }; Body: Omit<TaskResult, "taskId" | "submittedAt"> }>(

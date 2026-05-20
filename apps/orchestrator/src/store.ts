@@ -51,6 +51,11 @@ export interface VerdictQuery {
   accepted?: boolean;
 }
 
+export interface TaskVerdictsQuery {
+  taskId: string;
+  limit: number;
+}
+
 export type AuditEventType =
   | "task_created"
   | "task_claimed"
@@ -410,6 +415,20 @@ export function getRecentVerdicts(query: VerdictQuery): TaskVerdictLogEntry[] {
   });
 
   return filtered.slice(-bounded).reverse();
+}
+
+export function getTaskVerdicts(query: TaskVerdictsQuery): { found: boolean; items: TaskVerdictLogEntry[] } {
+  const record = tasks.get(query.taskId);
+  if (!record) {
+    return { found: false, items: [] };
+  }
+
+  const items = getRecentVerdicts({
+    limit: query.limit,
+    taskId: query.taskId
+  });
+
+  return { found: true, items };
 }
 
 export function getAuditLog(query: AuditQuery): AuditLogEntry[] {

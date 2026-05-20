@@ -136,6 +136,7 @@ The orchestrator performs:
 - `GET /tasks?state=pending|leased|completed|failed&limit=20`
 - `GET /tasks/:id`
 - `GET /tasks/:id/results?limit=50`
+- `GET /tasks/:id/verdicts?limit=50`
 - `GET /tasks/claim?nodeId=...`
 - `POST /tasks/:id/result`
 - `POST /tasks/:id/cancel`

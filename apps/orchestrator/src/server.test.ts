@@ -352,6 +352,61 @@ test("GET /tasks/:id/results returns submitted results", async (t) => {
   assert.equal(invalidLimit.statusCode, 400);
 });
 
+test("GET /tasks/:id/verdicts returns task-specific verdict history", async (t) => {
+  const app = buildApp();
+  t.after(() => app.close());
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    payload: {
+      kind: "molecule_score",
+      payload: { smiles: "CNO" },
+      quorum: 2
+    }
+  });
+  const task = created.json();
+
+  await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-v-1" });
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-v-1",
+      checksum: "v-ok",
+      score: 0.64,
+      payload: {}
+    }
+  });
+
+  await app.inject({
+    method: "POST",
+    url: `/tasks/${task.id}/result`,
+    payload: {
+      nodeId: "node-v-1",
+      checksum: "v-dup",
+      score: 0.61,
+      payload: {}
+    }
+  });
+
+  const verdicts = await app.inject({ method: "GET", url: `/tasks/${task.id}/verdicts?limit=10` });
+  assert.equal(verdicts.statusCode, 200);
+  assert.equal(verdicts.json().items.length, 2);
+  assert.equal(verdicts.json().items[0].accepted, false);
+  assert.equal(verdicts.json().items[1].accepted, true);
+
+  const bounded = await app.inject({ method: "GET", url: `/tasks/${task.id}/verdicts?limit=1` });
+  assert.equal(bounded.statusCode, 200);
+  assert.equal(bounded.json().items.length, 1);
+
+  const missing = await app.inject({ method: "GET", url: "/tasks/not-found/verdicts" });
+  assert.equal(missing.statusCode, 404);
+
+  const invalidLimit = await app.inject({ method: "GET", url: `/tasks/${task.id}/verdicts?limit=0` });
+  assert.equal(invalidLimit.statusCode, 400);
+});
+
 test("expired lease allows another node to claim same task", async (t) => {
   let now = 1_000;
   configureStoreRuntime({
