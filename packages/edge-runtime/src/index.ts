@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import os from "node:os";
+import type { EdgeAgentMode, EdgeRuntimeConfig } from "./worker.js";
 import { defaultCapabilities, runEdgeRuntime } from "./worker.js";
 
 const allTaskKinds = [
@@ -54,23 +55,28 @@ function resolveCapabilities() {
   };
 }
 
-const config = {
+const agentModeFromEnv = (process.env.EDGE_AGENT_MODE ?? "full") as EdgeAgentMode;
+const agentMode: EdgeAgentMode =
+  (["full", "mobile_safe", "package_worker", "llm_central"] as const).includes(agentModeFromEnv)
+    ? agentModeFromEnv
+    : "full";
+
+const packagePolicyMode: EdgeRuntimeConfig["packagePolicyMode"] =
+  process.env.EDGE_PACKAGE_POLICY_MODE === "relaxed" ? "relaxed" : "strict";
+
+const config: EdgeRuntimeConfig = {
   orchestratorUrl: process.env.ORCHESTRATOR_URL ?? "http://localhost:4000",
   nodeId: process.env.NODE_ID ?? `node-${crypto.randomUUID().slice(0, 8)}`,
   capabilities: resolveCapabilities(),
   adminApiKey: process.env.EDGE_ADMIN_API_KEY,
   packageSigningKey: process.env.EDGE_PACKAGE_SIGNING_KEY,
   taskSigningKey: process.env.EDGE_TASK_SIGNING_KEY,
-  packagePolicyMode: process.env.EDGE_PACKAGE_POLICY_MODE === "relaxed" ? "relaxed" : "strict",
+  packagePolicyMode,
   allowedPackagePermissions: (process.env.EDGE_ALLOWED_PACKAGE_PERMISSIONS ?? "")
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0),
-  agentMode: (["full", "mobile_safe", "package_worker", "llm_central"] as const).includes(
-    (process.env.EDGE_AGENT_MODE ?? "full") as "full" | "mobile_safe" | "package_worker" | "llm_central"
-  )
-    ? ((process.env.EDGE_AGENT_MODE ?? "full") as "full" | "mobile_safe" | "package_worker" | "llm_central")
-    : "full",
+  agentMode,
   allowedTaskKinds: (process.env.EDGE_ALLOWED_TASK_KINDS ?? "")
     .split(",")
     .map((item) => item.trim())

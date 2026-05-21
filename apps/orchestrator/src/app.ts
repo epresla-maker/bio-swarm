@@ -35,6 +35,7 @@ import {
   submitResult,
   updateNodeControl
 } from "./store.js";
+import type { PackagePermission } from "./store.js";
 import { renderAdminDashboardPage } from "./admin-dashboard-page.js";
 
 interface AdminRateState {
@@ -472,12 +473,20 @@ export function buildApp(options?: {
       return reply.status(400).send({ error: "invalid_package_content" });
     }
 
-    const permissions = Array.isArray(request.body.permissions) ? request.body.permissions : [];
+    const permissions = (Array.isArray(request.body.permissions) ? request.body.permissions : []) as string[];
     if (!permissions.every((item) => typeof item === "string" && allowedPackagePermissions.has(item))) {
       return reply.status(400).send({ error: "invalid_package_permissions" });
     }
 
-    const registered = registerWorkerPackage({ name, version, runtime, entrypoint, permissions, content });
+    const normalizedPermissions = permissions as PackagePermission[];
+    const registered = registerWorkerPackage({
+      name,
+      version,
+      runtime,
+      entrypoint,
+      permissions: normalizedPermissions,
+      content
+    });
     return reply.status(201).send(registered);
   });
 
