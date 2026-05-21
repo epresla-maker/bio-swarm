@@ -10,6 +10,7 @@ import {
   getAuditLog,
   getAdminDashboardSnapshot,
   getAuditPersistenceStatus,
+  getStatePersistenceStatus,
   getNodeSnapshot,
   getNodeStatusSummary,
   getWorkerStatusSummary,
@@ -95,6 +96,7 @@ export function buildApp(options?: {
     "heartbeat_received",
     "lease_expired"
   ]);
+  const allowedPackagePermissions = new Set(["filesystem", "network", "environment"]);
 
   function enforceAdminAccess(request: { headers: Record<string, string | string[] | undefined>; ip: string }, reply: { status: (code: number) => { send: (payload: Record<string, string>) => unknown } }): boolean {
     if (!adminApiKey) {
@@ -444,6 +446,7 @@ export function buildApp(options?: {
       version?: string;
       runtime?: string;
       entrypoint?: string;
+      permissions?: string[];
       content?: string;
     };
   }>("/packages", async (request, reply) => {
@@ -469,7 +472,12 @@ export function buildApp(options?: {
       return reply.status(400).send({ error: "invalid_package_content" });
     }
 
-    const registered = registerWorkerPackage({ name, version, runtime, entrypoint, content });
+    const permissions = Array.isArray(request.body.permissions) ? request.body.permissions : [];
+    if (!permissions.every((item) => typeof item === "string" && allowedPackagePermissions.has(item))) {
+      return reply.status(400).send({ error: "invalid_package_permissions" });
+    }
+
+    const registered = registerWorkerPackage({ name, version, runtime, entrypoint, permissions, content });
     return reply.status(201).send(registered);
   });
 
@@ -619,13 +627,37 @@ export function buildApp(options?: {
     return reply.status(200).send({ items });
   });
 
-  app.get<{ Querystring: { nodeId?: string } }>("/tasks/claim", async (request, reply) => {
+  app.get<{ Querystring: { nodeId?: string; supportedKinds?: string } }>("/tasks/claim", async (request, reply) => {
     const nodeId = request.query.nodeId;
     if (!nodeId) {
       return reply.status(400).send({ error: "missing_node_id" });
     }
 
-    const task = claimTask(nodeId);
+    const allowedTaskKinds = new Set<SwarmTask["kind"]>([
+      "molecule_score",
+      "embedding_generate",
+      "bio_prescreen",
+      "hypothesis_rank",
+      "bio_simulation",
+      "llm_inference",
+      "package_execute"
+    ]);
+
+    let supportedKinds: Set<SwarmTask["kind"]> | undefined;
+    if (typeof request.query.supportedKinds === "string" && request.query.supportedKinds.trim().length > 0) {
+      const parsed = request.query.supportedKinds
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+      if (parsed.some((item) => !allowedTaskKinds.has(item as SwarmTask["kind"]))) {
+        return reply.status(400).send({ error: "invalid_supported_kinds" });
+      }
+
+      supportedKinds = new Set(parsed as SwarmTask["kind"][]);
+    }
+
+    const task = claimTask(nodeId, { supportedKinds });
     if (!task) {
       return reply.status(204).send();
     }
@@ -957,7 +989,8 @@ export function buildApp(options?: {
       recentWorkers: listWorkers(5),
       recentVerdicts: getRecentVerdicts({ limit: 5 }),
       recentAudit: getAuditLog({ limit: 5 }),
-      auditPersistence: getAuditPersistenceStatus()
+      auditPersistence: getAuditPersistenceStatus(),
+      statePersistence: getStatePersistenceStatus()
     };
   });
 

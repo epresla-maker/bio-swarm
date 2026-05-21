@@ -19,6 +19,7 @@ interface WorkerPackageRecord {
   version: string;
   runtime: string;
   entrypoint: string;
+  permissions: PackagePermission[];
   content: string;
   checksum: string;
   signature: string | null;
@@ -26,12 +27,15 @@ interface WorkerPackageRecord {
   createdAt: string;
 }
 
+export type PackagePermission = "filesystem" | "network" | "environment";
+
 export interface WorkerPackageView {
   packageId: string;
   name: string;
   version: string;
   runtime: string;
   entrypoint: string;
+  permissions: PackagePermission[];
   checksum: string;
   signature: string | null;
   signatureAlgorithm: "hmac-sha256" | null;
@@ -144,6 +148,16 @@ export interface AuditPersistenceStatus {
   fileExists: boolean;
   fileSizeBytes: number;
   rotatedFileCount: number;
+  lastLoadedAt: string | null;
+  lastWrittenAt: string | null;
+  lastError: string | null;
+}
+
+export interface StatePersistenceStatus {
+  enabled: boolean;
+  path: string | null;
+  fileExists: boolean;
+  fileSizeBytes: number;
   lastLoadedAt: string | null;
   lastWrittenAt: string | null;
   lastError: string | null;
@@ -279,6 +293,30 @@ let auditLogRetentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30);
 let lastAuditLoadedAt: string | null = null;
 let lastAuditWrittenAt: string | null = null;
 let lastAuditError: string | null = null;
+let stateSnapshotPath: string | null = null;
+let lastStateLoadedAt: string | null = null;
+let lastStateWrittenAt: string | null = null;
+let lastStateError: string | null = null;
+
+interface PersistentStateSnapshot {
+  tasks: Array<{
+    task: SwarmTask;
+    results: TaskResult[];
+    completed: boolean;
+    failed: boolean;
+    leaseOwner: string | null;
+    leaseExpiresAt: number | null;
+    attempts: number;
+  }>;
+  nodeStats: NodeStats[];
+  nodeCapabilities: Array<{ nodeId: string; capabilities: NodeCapabilities }>;
+  nodeControlStates: Array<{ nodeId: string; control: NodeControlState }>;
+  workers: WorkerRecord[];
+  workerPackages: WorkerPackageRecord[];
+  taskVerdicts: TaskVerdictLogEntry[];
+  retryCount: number;
+  expiredLeaseCount: number;
+}
 
 export function configureStoreRuntime(options: {
   leaseTtlMs?: number;
@@ -334,11 +372,43 @@ export function resetStoreForTests(): void {
   lastAuditLoadedAt = null;
   lastAuditWrittenAt = null;
   lastAuditError = null;
+  stateSnapshotPath = null;
+  lastStateLoadedAt = null;
+  lastStateWrittenAt = null;
+  lastStateError = null;
   leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
   maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
   autoQuarantineMinRejected = Number(process.env.AUTO_QUARANTINE_MIN_REJECTED ?? 3);
   autoUnquarantineAfterMs = Number(process.env.AUTO_UNQUARANTINE_AFTER_MS ?? 300_000);
   nowProvider = () => Date.now();
+}
+
+export function configureStatePersistence(config?: string | { filePath?: string }): void {
+  const filePath = typeof config === "string" ? config : config?.filePath;
+
+  if (!filePath) {
+    stateSnapshotPath = null;
+    return;
+  }
+
+  stateSnapshotPath = filePath;
+  ensureStateSnapshotLoadedFromDisk(filePath);
+}
+
+export function getStatePersistenceStatus(): StatePersistenceStatus {
+  const enabled = Boolean(stateSnapshotPath);
+  const fileExists = enabled && stateSnapshotPath ? fs.existsSync(stateSnapshotPath) : false;
+  const fileSizeBytes = fileExists && stateSnapshotPath ? fs.statSync(stateSnapshotPath).size : 0;
+
+  return {
+    enabled,
+    path: stateSnapshotPath,
+    fileExists,
+    fileSizeBytes,
+    lastLoadedAt: lastStateLoadedAt,
+    lastWrittenAt: lastStateWrittenAt,
+    lastError: lastStateError
+  };
 }
 
 export function configureAuditLogPersistence(
@@ -506,13 +576,23 @@ export function getAdminDashboardSnapshot(): AdminDashboardSnapshot {
 }
 
 export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
+  const createdAt = new Date(nowProvider()).toISOString();
   const task: SwarmTask = {
     id: crypto.randomUUID(),
-    createdAt: new Date(nowProvider()).toISOString(),
+    createdAt,
     kind: input.kind,
     payload: input.payload,
     quorum: input.quorum
   };
+
+  const signedTask = signTaskEnvelope(task);
+  if (signedTask.expiresAt) {
+    task.expiresAt = signedTask.expiresAt;
+  }
+  if (signedTask.signature) {
+    task.signature = signedTask.signature;
+    task.signatureAlgorithm = "hmac-sha256";
+  }
 
   tasks.set(task.id, {
     task,
@@ -530,7 +610,33 @@ export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
     details: { kind: task.kind, quorum: task.quorum }
   });
 
+  persistStateSnapshotIfConfigured();
+
   return task;
+}
+
+function signTaskEnvelope(task: SwarmTask): { expiresAt: string | null; signature: string | null } {
+  const signingKey = process.env.TASK_SIGNING_KEY?.trim() ?? "";
+  if (!signingKey) {
+    return { expiresAt: null, signature: null };
+  }
+
+  const ttlMsRaw = Number(process.env.TASK_SIGNATURE_TTL_MS ?? 3_600_000);
+  const ttlMs = Number.isFinite(ttlMsRaw) && ttlMsRaw > 0 ? Math.floor(ttlMsRaw) : 3_600_000;
+  const expiresAt = new Date(new Date(task.createdAt).getTime() + ttlMs).toISOString();
+  const payload = JSON.stringify({
+    id: task.id,
+    kind: task.kind,
+    payload: task.payload,
+    createdAt: task.createdAt,
+    quorum: task.quorum,
+    expiresAt
+  });
+
+  return {
+    expiresAt,
+    signature: crypto.createHmac("sha256", signingKey).update(payload).digest("hex")
+  };
 }
 
 export function registerWorkerPackage(input: {
@@ -538,15 +644,18 @@ export function registerWorkerPackage(input: {
   version: string;
   runtime: string;
   entrypoint: string;
+  permissions?: PackagePermission[];
   content: string;
 }): WorkerPackageView {
   const createdAt = new Date(nowProvider()).toISOString();
   const checksum = crypto.createHash("sha256").update(input.content).digest("hex");
+  const permissions = normalizePackagePermissions(input.permissions);
   const signature = signWorkerPackage({
     name: input.name,
     version: input.version,
     runtime: input.runtime,
     entrypoint: input.entrypoint,
+    permissions,
     checksum
   });
 
@@ -557,6 +666,7 @@ export function registerWorkerPackage(input: {
   if (existing) {
     existing.runtime = input.runtime;
     existing.entrypoint = input.entrypoint;
+    existing.permissions = permissions;
     existing.content = input.content;
     existing.checksum = checksum;
     existing.signature = signature;
@@ -572,6 +682,7 @@ export function registerWorkerPackage(input: {
     version: input.version,
     runtime: input.runtime,
     entrypoint: input.entrypoint,
+    permissions,
     content: input.content,
     checksum,
     signature,
@@ -580,6 +691,7 @@ export function registerWorkerPackage(input: {
   };
 
   workerPackages.set(packageId, record);
+  persistStateSnapshotIfConfigured();
   return toWorkerPackageView(record);
 }
 
@@ -673,6 +785,7 @@ function toWorkerPackageView(item: WorkerPackageRecord): WorkerPackageView {
     version: item.version,
     runtime: item.runtime,
     entrypoint: item.entrypoint,
+    permissions: item.permissions,
     checksum: item.checksum,
     signature: item.signature,
     signatureAlgorithm: item.signatureAlgorithm,
@@ -686,6 +799,7 @@ function signWorkerPackage(input: {
   version: string;
   runtime: string;
   entrypoint: string;
+  permissions: PackagePermission[];
   checksum: string;
 }): string | null {
   const signingKey = process.env.PACKAGE_SIGNING_KEY?.trim() ?? "";
@@ -698,13 +812,26 @@ function signWorkerPackage(input: {
     version: input.version,
     runtime: input.runtime,
     entrypoint: input.entrypoint,
+    permissions: input.permissions,
     checksum: input.checksum
   });
 
   return crypto.createHmac("sha256", signingKey).update(payload).digest("hex");
 }
 
-export function claimTask(nodeId: string): SwarmTask | null {
+function normalizePackagePermissions(input: PackagePermission[] | undefined): PackagePermission[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    return [];
+  }
+
+  const allowed = new Set<PackagePermission>(["filesystem", "network", "environment"]);
+  return Array.from(new Set(input.filter((item): item is PackagePermission => allowed.has(item)))).sort();
+}
+
+export function claimTask(
+  nodeId: string,
+  options?: { supportedKinds?: ReadonlySet<SwarmTask["kind"]> }
+): SwarmTask | null {
   sweepExpiredLeases();
 
   if (!isNodeClaimEnabled(nodeId)) {
@@ -717,6 +844,10 @@ export function claimTask(nodeId: string): SwarmTask | null {
     }
 
     if (!canNodeClaimTask(nodeId, record.task)) {
+      continue;
+    }
+
+    if (options?.supportedKinds && !options.supportedKinds.has(record.task.kind)) {
       continue;
     }
 
@@ -750,6 +881,7 @@ export function claimTask(nodeId: string): SwarmTask | null {
       nodeId,
       details: { attempts: record.attempts }
     });
+    persistStateSnapshotIfConfigured();
     return record.task;
   }
 
@@ -766,7 +898,38 @@ function canNodeClaimTask(nodeId: string, task: SwarmTask): boolean {
     return false;
   }
 
-  return typeof capabilities.gpu.vramGb === "number" && Number.isFinite(capabilities.gpu.vramGb) && capabilities.gpu.vramGb > 0;
+  if (!(typeof capabilities.gpu.vramGb === "number" && Number.isFinite(capabilities.gpu.vramGb) && capabilities.gpu.vramGb > 0)) {
+    return false;
+  }
+
+  if (capabilities.llm?.role !== "central_host") {
+    return false;
+  }
+
+  const requestedModel = getRequestedLlmModelVersion(task);
+  if (!requestedModel) {
+    return true;
+  }
+
+  const supportedModels = capabilities.llm.modelVersions
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  if (supportedModels.length === 0) {
+    return false;
+  }
+
+  return supportedModels.includes(requestedModel);
+}
+
+function getRequestedLlmModelVersion(task: SwarmTask): string | null {
+  const raw = task.payload.modelVersion;
+  if (typeof raw !== "string") {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function submitResult(result: TaskResult): { accepted: boolean; reason?: string } {
@@ -852,6 +1015,8 @@ export function submitResult(result: TaskResult): { accepted: boolean; reason?: 
     details: { score: result.score }
   });
 
+  persistStateSnapshotIfConfigured();
+
   return { accepted: true };
 }
 
@@ -878,6 +1043,8 @@ export function cancelTask(taskId: string): { canceled: boolean; reason?: string
     taskId,
     details: { attempts: record.attempts, resultCount: record.results.length }
   });
+
+  persistStateSnapshotIfConfigured();
 
   return { canceled: true };
 }
@@ -909,6 +1076,8 @@ export function requeueTask(taskId: string): { requeued: boolean; reason?: strin
     details: { quorum: record.task.quorum }
   });
 
+  persistStateSnapshotIfConfigured();
+
   return { requeued: true };
 }
 
@@ -930,6 +1099,8 @@ export function deleteTask(taskId: string): { deleted: boolean; reason?: string 
       resultCount: record.results.length
     }
   });
+
+  persistStateSnapshotIfConfigured();
 
   return { deleted: true };
 }
@@ -1009,6 +1180,7 @@ export function recordHeartbeat(nodeId: string, capabilities?: NodeCapabilities)
     nodeId,
     details: capabilities ? { capabilities } : undefined
   });
+  persistStateSnapshotIfConfigured();
   return stats;
 }
 
@@ -1122,6 +1294,8 @@ export function updateNodeControl(
     nodeId,
     details: control.reason ? { reason: control.reason } : undefined
   });
+
+  persistStateSnapshotIfConfigured();
 
   return { found: true, control };
 }
@@ -1244,6 +1418,7 @@ export function registerWorker(input: {
   };
 
   workers.set(input.workerId, record);
+  persistStateSnapshotIfConfigured();
   return toWorkerSnapshot(record);
 }
 
@@ -1308,6 +1483,7 @@ export function heartbeatWorker(
   }
 
   existing.lastSeenAt = new Date(nowProvider()).toISOString();
+  persistStateSnapshotIfConfigured();
   return toWorkerSnapshot(existing);
 }
 
@@ -1503,6 +1679,7 @@ function clearLease(record: TaskRecord): void {
 
 function sweepExpiredLeases(): void {
   const now = nowProvider();
+  let changed = false;
 
   for (const record of tasks.values()) {
     if (record.completed || record.failed || !record.leaseOwner || record.leaseExpiresAt === null) {
@@ -1514,6 +1691,7 @@ function sweepExpiredLeases(): void {
     }
 
     expiredLeaseCount += 1;
+    changed = true;
     pushAuditEvent({
       eventType: "lease_expired",
       taskId: record.task.id,
@@ -1525,6 +1703,10 @@ function sweepExpiredLeases(): void {
     if (record.attempts >= maxAttempts && record.results.length < record.task.quorum) {
       record.failed = true;
     }
+  }
+
+  if (changed) {
+    persistStateSnapshotIfConfigured();
   }
 }
 
@@ -1663,6 +1845,121 @@ function ensureAuditLogLoadedFromDisk(filePath: string): void {
     lastAuditError = "audit_load_failed";
     // Ignore persistence bootstrap failures in MVP mode.
   }
+}
+
+function persistStateSnapshotIfConfigured(): void {
+  if (!stateSnapshotPath) {
+    return;
+  }
+
+  try {
+    const snapshot = serializeStateSnapshot();
+    fs.mkdirSync(path.dirname(stateSnapshotPath), { recursive: true });
+    const tempPath = `${stateSnapshotPath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(snapshot, null, 2), "utf8");
+    fs.renameSync(tempPath, stateSnapshotPath);
+    lastStateWrittenAt = new Date(nowProvider()).toISOString();
+    lastStateError = null;
+  } catch {
+    lastStateError = "state_snapshot_write_failed";
+  }
+}
+
+function ensureStateSnapshotLoadedFromDisk(filePath: string): void {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    if (!fs.existsSync(filePath)) {
+      persistStateSnapshotIfConfigured();
+      lastStateLoadedAt = new Date(nowProvider()).toISOString();
+      lastStateError = null;
+      return;
+    }
+
+    const text = fs.readFileSync(filePath, "utf8").trim();
+    if (!text) {
+      lastStateLoadedAt = new Date(nowProvider()).toISOString();
+      lastStateError = null;
+      return;
+    }
+
+    const parsed = JSON.parse(text) as PersistentStateSnapshot;
+    restoreStateSnapshot(parsed);
+    lastStateLoadedAt = new Date(nowProvider()).toISOString();
+    lastStateError = null;
+  } catch {
+    lastStateError = "state_snapshot_load_failed";
+  }
+}
+
+function serializeStateSnapshot(): PersistentStateSnapshot {
+  return {
+    tasks: Array.from(tasks.values()).map((record) => ({
+      task: record.task,
+      results: record.results,
+      completed: record.completed,
+      failed: record.failed,
+      leaseOwner: record.leaseOwner,
+      leaseExpiresAt: record.leaseExpiresAt,
+      attempts: record.attempts
+    })),
+    nodeStats: Array.from(nodeStats.values()),
+    nodeCapabilities: Array.from(nodeCapabilities.entries()).map(([nodeId, capabilities]) => ({ nodeId, capabilities })),
+    nodeControlStates: Array.from(nodeControlStates.entries()).map(([nodeId, control]) => ({ nodeId, control })),
+    workers: Array.from(workers.values()),
+    workerPackages: Array.from(workerPackages.values()),
+    taskVerdicts: [...taskVerdicts],
+    retryCount,
+    expiredLeaseCount
+  };
+}
+
+function restoreStateSnapshot(snapshot: PersistentStateSnapshot): void {
+  tasks.clear();
+  nodeStats.clear();
+  nodeCapabilities.clear();
+  nodeControlStates.clear();
+  workers.clear();
+  workerPackages.clear();
+  taskVerdicts.length = 0;
+
+  for (const item of snapshot.tasks ?? []) {
+    tasks.set(item.task.id, {
+      task: item.task,
+      results: item.results ?? [],
+      completed: Boolean(item.completed),
+      failed: Boolean(item.failed),
+      leaseOwner: item.leaseOwner ?? null,
+      leaseExpiresAt: typeof item.leaseExpiresAt === "number" ? item.leaseExpiresAt : null,
+      attempts: typeof item.attempts === "number" ? item.attempts : 0
+    });
+  }
+
+  for (const stats of snapshot.nodeStats ?? []) {
+    nodeStats.set(stats.nodeId, stats);
+  }
+
+  for (const item of snapshot.nodeCapabilities ?? []) {
+    nodeCapabilities.set(item.nodeId, item.capabilities);
+  }
+
+  for (const item of snapshot.nodeControlStates ?? []) {
+    nodeControlStates.set(item.nodeId, item.control);
+  }
+
+  for (const worker of snapshot.workers ?? []) {
+    workers.set(worker.workerId, worker);
+  }
+
+  for (const pkg of snapshot.workerPackages ?? []) {
+    workerPackages.set(pkg.packageId, pkg);
+  }
+
+  for (const verdict of snapshot.taskVerdicts ?? []) {
+    taskVerdicts.push(verdict);
+  }
+
+  retryCount = typeof snapshot.retryCount === "number" ? snapshot.retryCount : 0;
+  expiredLeaseCount = typeof snapshot.expiredLeaseCount === "number" ? snapshot.expiredLeaseCount : 0;
 }
 
 function rotateAuditLogIfNeeded(filePath: string, nextEntryBytes: number): void {

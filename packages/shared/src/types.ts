@@ -13,12 +13,22 @@ export interface NodeGpuInfo {
   vramGb: number;
 }
 
+export interface NodeLlmInfo {
+  role: "central_host";
+  modelVersions: string[];
+  maxContextTokens?: number;
+  concurrency?: number;
+}
+
 export interface SwarmTask {
   id: string;
   kind: TaskKind;
   payload: Record<string, unknown>;
   createdAt: string;
   quorum: number;
+  expiresAt?: string;
+  signature?: string;
+  signatureAlgorithm?: "hmac-sha256";
 }
 
 export interface TaskClaim {
@@ -34,6 +44,7 @@ export interface NodeCapabilities {
   userOptIn: boolean;
   nodeClass?: "mobile" | "desktop_gpu";
   gpu?: NodeGpuInfo;
+  llm?: NodeLlmInfo;
 }
 
 export interface TaskResult {

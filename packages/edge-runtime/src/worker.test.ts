@@ -49,6 +49,7 @@ function signPackage(input: {
   version?: string;
   runtime: string;
   entrypoint: string;
+  permissions?: string[];
   checksum: string;
   key: string;
 }): string {
@@ -57,7 +58,29 @@ function signPackage(input: {
     version: input.version ?? "",
     runtime: input.runtime,
     entrypoint: input.entrypoint,
+    permissions: input.permissions ?? [],
     checksum: input.checksum
+  });
+
+  return crypto.createHmac("sha256", input.key).update(payload).digest("hex");
+}
+
+function signTaskEnvelope(input: {
+  id: string;
+  kind: SwarmTask["kind"];
+  payload: Record<string, unknown>;
+  createdAt: string;
+  quorum: number;
+  expiresAt: string;
+  key: string;
+}): string {
+  const payload = JSON.stringify({
+    id: input.id,
+    kind: input.kind,
+    payload: input.payload,
+    createdAt: input.createdAt,
+    quorum: input.quorum,
+    expiresAt: input.expiresAt
   });
 
   return crypto.createHmac("sha256", input.key).update(payload).digest("hex");
@@ -101,6 +124,64 @@ test("processTask handles llm_inference payload", async () => {
   assert.equal(typeof result.score, "number");
   assert.ok(result.score >= 0);
   assert.ok(result.score <= 1);
+});
+
+test("processTask verifies signed task envelope when taskSigningKey is configured", async () => {
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  const payload = { sample: "signed-task" };
+  const signature = signTaskEnvelope({
+    id: "t-signed-1",
+    kind: "bio_prescreen",
+    payload,
+    createdAt,
+    quorum: 1,
+    expiresAt,
+    key: "task-sign-key"
+  });
+
+  const result = await processTask(
+    {
+      id: "t-signed-1",
+      kind: "bio_prescreen",
+      payload,
+      createdAt,
+      quorum: 1,
+      expiresAt,
+      signature,
+      signatureAlgorithm: "hmac-sha256"
+    },
+    "node-signed-1",
+    {
+      ...createConfig(),
+      taskSigningKey: "task-sign-key"
+    }
+  );
+
+  assert.equal(result.score > 0, true);
+});
+
+test("processTask rejects signed task when signature is invalid", async () => {
+  const result = await processTask(
+    {
+      id: "t-signed-bad-1",
+      kind: "bio_prescreen",
+      payload: { sample: "signed-task" },
+      createdAt: new Date().toISOString(),
+      quorum: 1,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      signature: "deadbeef",
+      signatureAlgorithm: "hmac-sha256"
+    },
+    "node-signed-bad-1",
+    {
+      ...createConfig(),
+      taskSigningKey: "task-sign-key"
+    }
+  );
+
+  assert.equal(result.score, 0);
+  assert.equal(result.payload.error, "task_signature_invalid");
 });
 
 test("processTask handles package_execute with package download and checksum verification", async () => {
@@ -273,6 +354,7 @@ test("processTask verifies package signature with packageSigningKey", async () =
     version: "1.0.0",
     runtime: "node",
     entrypoint: "index.js",
+    permissions: [],
     checksum,
     key: signingKey
   });
@@ -286,6 +368,7 @@ test("processTask verifies package signature with packageSigningKey", async () =
           version: "1.0.0",
           runtime: "node",
           entrypoint: "index.js",
+          permissions: [],
           checksum,
           signature,
           signatureAlgorithm: "hmac-sha256",
@@ -338,6 +421,7 @@ test("processTask rejects package when signature is invalid for packageSigningKe
           version: "1.0.0",
           runtime: "node",
           entrypoint: "index.js",
+          permissions: [],
           checksum,
           signature: "deadbeef",
           signatureAlgorithm: "hmac-sha256",
@@ -373,6 +457,138 @@ test("processTask rejects package when signature is invalid for packageSigningKe
 
   assert.equal(result.score, 0);
   assert.equal(result.payload.error, "signature_invalid");
+});
+
+test("processTask rejects package when required permissions are undeclared", async () => {
+  resetPackageCacheForTests();
+  const packageContent = "import fs from 'node:fs'; export function run(){ return fs.readFileSync('x'); }";
+  const checksum = crypto.createHash("sha256").update(packageContent).digest("hex");
+
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/packages/pkg-policy-1")) {
+      return new Response(
+        JSON.stringify({
+          packageId: "pkg-policy-1",
+          name: "policy-kernel",
+          version: "1.0.0",
+          runtime: "node",
+          entrypoint: "index.js",
+          permissions: [],
+          checksum,
+          content: packageContent
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    return new Response("", { status: 404 });
+  });
+
+  const result = await processTask(
+    {
+      id: "t-policy-1",
+      kind: "package_execute",
+      payload: { packageId: "pkg-policy-1", checksum, input: {} },
+      createdAt: new Date().toISOString(),
+      quorum: 1
+    },
+    "node-policy-1",
+    { ...createConfig(), adminApiKey: "edge-package-key" },
+    deps
+  );
+
+  assert.equal(result.score, 0);
+  assert.equal(result.payload.error, "sandbox_blocked");
+  assert.equal(result.payload.reason, "undeclared_permissions:filesystem");
+});
+
+test("processTask rejects package when strict policy denies declared permissions", async () => {
+  resetPackageCacheForTests();
+  const packageContent = "export function run(){ return process.env.TEST_KEY ?? ''; }";
+  const checksum = crypto.createHash("sha256").update(packageContent).digest("hex");
+
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/packages/pkg-policy-2")) {
+      return new Response(
+        JSON.stringify({
+          packageId: "pkg-policy-2",
+          name: "policy-kernel",
+          version: "1.0.0",
+          runtime: "node",
+          entrypoint: "index.js",
+          permissions: ["environment"],
+          checksum,
+          content: packageContent
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    return new Response("", { status: 404 });
+  });
+
+  const result = await processTask(
+    {
+      id: "t-policy-2",
+      kind: "package_execute",
+      payload: { packageId: "pkg-policy-2", checksum, input: {} },
+      createdAt: new Date().toISOString(),
+      quorum: 1
+    },
+    "node-policy-2",
+    { ...createConfig(), adminApiKey: "edge-package-key" },
+    deps
+  );
+
+  assert.equal(result.score, 0);
+  assert.equal(result.payload.error, "sandbox_blocked");
+  assert.equal(result.payload.reason, "permission_denied:environment");
+});
+
+test("processTask allows package when relaxed policy permits declared permissions", async () => {
+  resetPackageCacheForTests();
+  const packageContent = "export function run(){ return process.env.TEST_KEY ?? ''; }";
+  const checksum = crypto.createHash("sha256").update(packageContent).digest("hex");
+
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/packages/pkg-policy-3")) {
+      return new Response(
+        JSON.stringify({
+          packageId: "pkg-policy-3",
+          name: "policy-kernel",
+          version: "1.0.0",
+          runtime: "node",
+          entrypoint: "index.js",
+          permissions: ["environment"],
+          checksum,
+          content: packageContent
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    return new Response("", { status: 404 });
+  });
+
+  const result = await processTask(
+    {
+      id: "t-policy-3",
+      kind: "package_execute",
+      payload: { packageId: "pkg-policy-3", checksum, input: {} },
+      createdAt: new Date().toISOString(),
+      quorum: 1
+    },
+    "node-policy-3",
+    {
+      ...createConfig(),
+      adminApiKey: "edge-package-key",
+      packagePolicyMode: "relaxed"
+    },
+    deps
+  );
+
+  assert.equal(result.score > 0, true);
+  assert.equal(result.payload.error, undefined);
 });
 
 test("processTask blocks package_execute when sandbox policy detects dangerous APIs", async () => {
@@ -503,6 +719,44 @@ test("claimTask returns null on network error", async () => {
 
   const claimed = await claimTask(createConfig(), deps);
   assert.equal(claimed, null);
+});
+
+test("claimTask sends supportedKinds derived from agent mode", async () => {
+  let requestedUrl = "";
+  const deps = createDeps(async (url) => {
+    requestedUrl = String(url);
+    return new Response("", { status: 204 });
+  });
+
+  await claimTask(
+    {
+      ...createConfig(),
+      agentMode: "package_worker"
+    },
+    deps
+  );
+
+  assert.equal(requestedUrl.includes("supportedKinds=package_execute"), true);
+});
+
+test("processTask blocks disallowed task kind for configured agent mode", async () => {
+  const result = await processTask(
+    {
+      id: "t-mode-1",
+      kind: "llm_inference",
+      payload: { prompt: "forbidden", modelVersion: "bio-llm-v1" },
+      createdAt: new Date().toISOString(),
+      quorum: 1
+    },
+    "node-mode-1",
+    {
+      ...createConfig(),
+      agentMode: "mobile_safe"
+    }
+  );
+
+  assert.equal(result.score, 0);
+  assert.equal(result.payload.error, "task_kind_not_allowed");
 });
 
 test("sendHeartbeat returns false for non-ok response", async () => {

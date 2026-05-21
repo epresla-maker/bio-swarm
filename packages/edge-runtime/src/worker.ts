@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
-import type { NodeCapabilities, SwarmTask, TaskResult } from "@bio-swarm/shared";
+import type { NodeCapabilities, SwarmTask, TaskKind, TaskResult } from "@bio-swarm/shared";
+
+export type EdgeAgentMode = "full" | "mobile_safe" | "package_worker" | "llm_central";
 
 export interface EdgeRuntimeConfig {
   orchestratorUrl: string;
@@ -7,7 +9,12 @@ export interface EdgeRuntimeConfig {
   capabilities: NodeCapabilities;
   adminApiKey?: string;
   packageSigningKey?: string;
+  taskSigningKey?: string;
+  packagePolicyMode?: "strict" | "relaxed";
+  allowedPackagePermissions?: string[];
   agentVersion?: string;
+  agentMode?: EdgeAgentMode;
+  allowedTaskKinds?: TaskKind[];
   platform?: string;
   idleSleepMs: number;
   claimSleepMs: number;
@@ -50,6 +57,23 @@ export const defaultDeps: EdgeRuntimeDeps = {
   log: console
 };
 
+const allTaskKinds: TaskKind[] = [
+  "molecule_score",
+  "embedding_generate",
+  "bio_prescreen",
+  "hypothesis_rank",
+  "bio_simulation",
+  "llm_inference",
+  "package_execute"
+];
+
+const modeDefaultAllowedKinds: Record<EdgeAgentMode, TaskKind[]> = {
+  full: allTaskKinds,
+  mobile_safe: ["molecule_score", "embedding_generate", "bio_prescreen", "hypothesis_rank"],
+  package_worker: ["package_execute"],
+  llm_central: ["llm_inference", "bio_simulation", "package_execute"]
+};
+
 interface ResolvedWorkerPackage {
   packageId: string;
   name: string | null;
@@ -59,6 +83,7 @@ interface ResolvedWorkerPackage {
   signatureAlgorithm: string | null;
   runtime: string;
   entrypoint: string;
+  permissions: string[];
   content: string;
 }
 
@@ -66,10 +91,12 @@ const packageCache = new Map<string, ResolvedWorkerPackage>();
 
 const blockedPackagePatterns: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /node:child_process|\bchild_process\b/, reason: "child_process_blocked" },
-  { pattern: /node:fs|\bfs\b/, reason: "filesystem_access_blocked" },
-  { pattern: /node:net|\bnet\b/, reason: "network_socket_access_blocked" },
-  { pattern: /node:dns|\bdns\b/, reason: "dns_access_blocked" },
-  { pattern: /process\.env/, reason: "process_env_access_blocked" }
+];
+
+const packagePermissionPatterns: Array<{ pattern: RegExp; permission: string }> = [
+  { pattern: /node:fs|\bfs\b/, permission: "filesystem" },
+  { pattern: /node:net|\bnet\b|node:dns|\bdns\b/, permission: "network" },
+  { pattern: /process\.env/, permission: "environment" }
 ];
 
 export function canProcess(input: NodeCapabilities): boolean {
@@ -90,8 +117,42 @@ export async function processTask(
   config?: EdgeRuntimeConfig,
   deps: EdgeRuntimeDeps = defaultDeps
 ): Promise<Omit<TaskResult, "taskId" | "submittedAt">> {
+  const allowedKinds = resolveAllowedTaskKinds(config);
+  if (!allowedKinds.has(task.kind)) {
+    return {
+      nodeId,
+      checksum: crypto
+        .createHash("sha256")
+        .update(JSON.stringify({ taskId: task.id, kind: task.kind, error: "task_kind_not_allowed" }))
+        .digest("hex"),
+      score: 0,
+      payload: {
+        error: "task_kind_not_allowed",
+        taskId: task.id,
+        taskKind: task.kind,
+        allowedTaskKinds: [...allowedKinds]
+      }
+    };
+  }
+
   let score = 0;
   let payload: Record<string, unknown> = {};
+
+  if (config?.taskSigningKey) {
+    const verificationError = verifyTaskEnvelope(task, config.taskSigningKey);
+    if (verificationError) {
+      return {
+        nodeId,
+        checksum: crypto.createHash("sha256").update(JSON.stringify({ task, error: verificationError })).digest("hex"),
+        score: 0,
+        payload: {
+          error: verificationError,
+          taskId: task.id,
+          taskSignatureVerified: false
+        }
+      };
+    }
+  }
 
   switch (task.kind) {
     case "molecule_score":
@@ -143,6 +204,36 @@ export async function processTask(
   };
 }
 
+function verifyTaskEnvelope(task: SwarmTask, signingKey: string): string | null {
+  if (!task.signature || task.signatureAlgorithm !== "hmac-sha256") {
+    return "task_signature_missing";
+  }
+
+  if (!task.expiresAt) {
+    return "task_signature_missing";
+  }
+
+  const expiresAtMs = Date.parse(task.expiresAt);
+  if (Number.isNaN(expiresAtMs) || expiresAtMs <= Date.now()) {
+    return "task_signature_expired";
+  }
+
+  const payload = JSON.stringify({
+    id: task.id,
+    kind: task.kind,
+    payload: task.payload,
+    createdAt: task.createdAt,
+    quorum: task.quorum,
+    expiresAt: task.expiresAt
+  });
+  const expected = crypto.createHmac("sha256", signingKey).update(payload).digest("hex");
+  if (expected !== task.signature) {
+    return "task_signature_invalid";
+  }
+
+  return null;
+}
+
 export async function claimTask(
   config: EdgeRuntimeConfig,
   deps: EdgeRuntimeDeps
@@ -150,7 +241,13 @@ export async function claimTask(
   let response: Response;
 
   try {
-    response = await deps.fetchFn(`${config.orchestratorUrl}/tasks/claim?nodeId=${config.nodeId}`);
+    const allowedKinds = [...resolveAllowedTaskKinds(config)];
+    const query = new URLSearchParams({ nodeId: config.nodeId });
+    if (allowedKinds.length > 0) {
+      query.set("supportedKinds", allowedKinds.join(","));
+    }
+
+    response = await deps.fetchFn(`${config.orchestratorUrl}/tasks/claim?${query.toString()}`);
   } catch (error) {
     deps.log.error("[edge-runtime] claim network error", error);
     return null;
@@ -166,6 +263,19 @@ export async function claimTask(
   }
 
   return (await response.json()) as SwarmTask;
+}
+
+function resolveAllowedTaskKinds(config?: EdgeRuntimeConfig): Set<TaskKind> {
+  const configured = (config?.allowedTaskKinds ?? [])
+    .map((item) => String(item).trim())
+    .filter((item): item is TaskKind => allTaskKinds.includes(item as TaskKind));
+
+  if (configured.length > 0) {
+    return new Set(configured);
+  }
+
+  const mode = config?.agentMode ?? "full";
+  return new Set(modeDefaultAllowedKinds[mode]);
 }
 
 export async function sendHeartbeat(config: EdgeRuntimeConfig, deps: EdgeRuntimeDeps): Promise<boolean> {
@@ -472,7 +582,7 @@ async function executePackageTask(
     }
   }
 
-  const sandboxViolation = getPackageSandboxViolation(pkg);
+  const sandboxViolation = getPackageSandboxViolation(pkg, config);
   if (sandboxViolation) {
     return {
       score: 0,
@@ -505,7 +615,7 @@ async function executePackageTask(
   };
 }
 
-function getPackageSandboxViolation(pkg: ResolvedWorkerPackage): string | null {
+function getPackageSandboxViolation(pkg: ResolvedWorkerPackage, config: EdgeRuntimeConfig): string | null {
   if (pkg.runtime !== "node") {
     return "unsupported_runtime";
   }
@@ -516,7 +626,35 @@ function getPackageSandboxViolation(pkg: ResolvedWorkerPackage): string | null {
     }
   }
 
+  const requiredPermissions = getRequiredPackagePermissions(pkg);
+  const declaredPermissions = new Set(pkg.permissions);
+  const missingPermissions = requiredPermissions.filter((permission) => !declaredPermissions.has(permission));
+  if (missingPermissions.length > 0) {
+    return `undeclared_permissions:${missingPermissions.join(",")}`;
+  }
+
+  const policyMode = config.packagePolicyMode ?? "strict";
+  if (policyMode === "strict") {
+    const allowedPermissions = new Set(config.allowedPackagePermissions ?? []);
+    const deniedPermissions = requiredPermissions.filter((permission) => !allowedPermissions.has(permission));
+    if (deniedPermissions.length > 0) {
+      return `permission_denied:${deniedPermissions.join(",")}`;
+    }
+  }
+
   return null;
+}
+
+function getRequiredPackagePermissions(pkg: ResolvedWorkerPackage): string[] {
+  const required = new Set<string>();
+
+  for (const pattern of packagePermissionPatterns) {
+    if (pattern.pattern.test(pkg.content)) {
+      required.add(pattern.permission);
+    }
+  }
+
+  return Array.from(required).sort();
 }
 
 async function resolveWorkerPackage(
@@ -564,6 +702,7 @@ async function resolveWorkerPackage(
     signatureAlgorithm: typeof parsed.signatureAlgorithm === "string" ? parsed.signatureAlgorithm : null,
     runtime: parsed.runtime,
     entrypoint: parsed.entrypoint,
+    permissions: Array.isArray(parsed.permissions) ? parsed.permissions.filter((item): item is string => typeof item === "string") : [],
     content: parsed.content
   };
 }
@@ -629,6 +768,7 @@ async function fetchWorkerPackage(
     signatureAlgorithm: typeof parsed.signatureAlgorithm === "string" ? parsed.signatureAlgorithm : null,
     runtime: parsed.runtime,
     entrypoint: parsed.entrypoint,
+    permissions: Array.isArray(parsed.permissions) ? parsed.permissions.filter((item): item is string => typeof item === "string") : [],
     content: parsed.content
   };
 }
@@ -639,6 +779,7 @@ function calculatePackageSignature(pkg: ResolvedWorkerPackage, key: string): str
     version: pkg.version ?? "",
     runtime: pkg.runtime,
     entrypoint: pkg.entrypoint,
+    permissions: pkg.permissions,
     checksum: pkg.checksum
   });
 

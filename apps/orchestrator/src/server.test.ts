@@ -198,7 +198,7 @@ test("node operator controls block claims until re-enabled", async (t) => {
   assert.ok(audit.json().items.some((item: { eventType: string }) => item.eventType === "node_enabled"));
 });
 
-test("llm_inference claim routing prefers desktop_gpu nodes", async (t) => {
+test("llm_inference claim routing targets central llm hosts by model version", async (t) => {
   const app = buildApp({ adminApiKey: "gpu-routing-key" });
   t.after(() => app.close());
 
@@ -219,7 +219,7 @@ test("llm_inference claim routing prefers desktop_gpu nodes", async (t) => {
 
   const desktopHeartbeat = await app.inject({
     method: "POST",
-    url: "/nodes/node-desktop/heartbeat",
+    url: "/nodes/node-desktop-generic/heartbeat",
     payload: {
       capabilities: {
         charging: true,
@@ -237,13 +237,37 @@ test("llm_inference claim routing prefers desktop_gpu nodes", async (t) => {
   });
   assert.equal(desktopHeartbeat.statusCode, 200);
 
+  const centralHeartbeat = await app.inject({
+    method: "POST",
+    url: "/nodes/node-central/heartbeat",
+    payload: {
+      capabilities: {
+        charging: true,
+        wifi: true,
+        idle: true,
+        userOptIn: true,
+        nodeClass: "desktop_gpu",
+        gpu: {
+          vendor: "nvidia",
+          model: "rtx-5090",
+          vramGb: 32
+        },
+        llm: {
+          role: "central_host",
+          modelVersions: ["bio-llm-v1", "bio-llm-v2"]
+        }
+      }
+    }
+  });
+  assert.equal(centralHeartbeat.statusCode, 200);
+
   const llmCreated = await app.inject({
     method: "POST",
     url: "/tasks",
     headers: { "x-admin-key": "gpu-routing-key" },
     payload: {
       kind: "llm_inference",
-      payload: { prompt: "Summarize the sample" },
+      payload: { prompt: "Summarize the sample", modelVersion: "bio-llm-v2" },
       quorum: 1
     }
   });
@@ -266,10 +290,73 @@ test("llm_inference claim routing prefers desktop_gpu nodes", async (t) => {
   assert.equal(mobileClaim.json().kind, "bio_prescreen");
   assert.equal(mobileClaim.json().id, normalCreated.json().id);
 
-  const desktopClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-desktop" });
+  const genericDesktopClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-desktop-generic" });
+  assert.equal(genericDesktopClaim.statusCode, 204);
+
+  const desktopClaim = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-central" });
   assert.equal(desktopClaim.statusCode, 200);
   assert.equal(desktopClaim.json().kind, "llm_inference");
   assert.equal(desktopClaim.json().id, llmCreated.json().id);
+});
+
+test("tasks claim endpoint validates and applies supportedKinds filter", async (t) => {
+  const app = buildApp({ adminApiKey: "claim-filter-key" });
+  t.after(() => app.close());
+
+  const centralHeartbeat = await app.inject({
+    method: "POST",
+    url: "/nodes/node-claim-filter/heartbeat",
+    payload: {
+      capabilities: {
+        charging: true,
+        wifi: true,
+        idle: true,
+        userOptIn: true,
+        nodeClass: "desktop_gpu",
+        gpu: {
+          vendor: "nvidia",
+          model: "rtx-4090",
+          vramGb: 24
+        },
+        llm: {
+          role: "central_host",
+          modelVersions: ["bio-llm-v1"]
+        }
+      }
+    }
+  });
+  assert.equal(centralHeartbeat.statusCode, 200);
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "claim-filter-key" },
+    payload: {
+      kind: "llm_inference",
+      payload: { prompt: "Route check", modelVersion: "bio-llm-v1" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+
+  const invalidKinds = await app.inject({
+    method: "GET",
+    url: "/tasks/claim?nodeId=node-claim-filter&supportedKinds=invalid_kind"
+  });
+  assert.equal(invalidKinds.statusCode, 400);
+
+  const filteredOut = await app.inject({
+    method: "GET",
+    url: "/tasks/claim?nodeId=node-claim-filter&supportedKinds=package_execute"
+  });
+  assert.equal(filteredOut.statusCode, 204);
+
+  const filteredIn = await app.inject({
+    method: "GET",
+    url: "/tasks/claim?nodeId=node-claim-filter&supportedKinds=llm_inference"
+  });
+  assert.equal(filteredIn.statusCode, 200);
+  assert.equal(filteredIn.json().id, created.json().id);
 });
 
 test("node is automatically quarantined after repeated rejected results", async (t) => {
@@ -521,6 +608,48 @@ test("task can be created, claimed and completed", async (t) => {
   const telemetry = await app.inject({ method: "GET", url: "/telemetry" });
   assert.equal(telemetry.statusCode, 200);
   assert.equal(telemetry.json().queue.completed, 1);
+});
+
+test("created and claimed task includes signature when TASK_SIGNING_KEY is set", async (t) => {
+  const previousKey = process.env.TASK_SIGNING_KEY;
+  const previousTtl = process.env.TASK_SIGNATURE_TTL_MS;
+  process.env.TASK_SIGNING_KEY = "task-sign-key";
+  process.env.TASK_SIGNATURE_TTL_MS = "60000";
+
+  const app = buildApp({ adminApiKey: "ops-key" });
+  t.after(() => {
+    app.close();
+    if (typeof previousKey === "string") {
+      process.env.TASK_SIGNING_KEY = previousKey;
+    } else {
+      delete process.env.TASK_SIGNING_KEY;
+    }
+
+    if (typeof previousTtl === "string") {
+      process.env.TASK_SIGNATURE_TTL_MS = previousTtl;
+    } else {
+      delete process.env.TASK_SIGNATURE_TTL_MS;
+    }
+  });
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/tasks",
+    headers: { "x-admin-key": "ops-key" },
+    payload: {
+      kind: "bio_prescreen",
+      payload: { sample: "signed" },
+      quorum: 1
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.json().signatureAlgorithm, "hmac-sha256");
+  assert.equal(typeof created.json().signature, "string");
+  assert.equal(typeof created.json().expiresAt, "string");
+
+  const claimed = await app.inject({ method: "GET", url: "/tasks/claim?nodeId=node-signed" });
+  assert.equal(claimed.statusCode, 200);
+  assert.equal(claimed.json().signatureAlgorithm, "hmac-sha256");
 });
 
 test("POST /tasks/:id/cancel cancels pending task and blocks further claims", async (t) => {
@@ -1391,6 +1520,8 @@ test("admin status endpoint returns audit persistence status", async (t) => {
   assert.ok(authorized.json().recentAudit.length >= 1);
   assert.equal(typeof authorized.json().auditPersistence.enabled, "boolean");
   assert.equal(typeof authorized.json().auditPersistence.maxBytes, "number");
+  assert.equal(typeof authorized.json().statePersistence.enabled, "boolean");
+  assert.equal(typeof authorized.json().statePersistence.fileExists, "boolean");
 });
 
 test("admin dashboard endpoint returns attention queues for operators", async (t) => {
@@ -1529,13 +1660,30 @@ test("package registry API creates, lists and fetches packages", async (t) => {
       version: "1.0.0",
       runtime: "node",
       entrypoint: "index.js",
+      permissions: ["environment"],
       content: "export function run(input){ return { ok: true, input }; }"
     }
   });
   assert.equal(created.statusCode, 201);
   assert.equal(typeof created.json().packageId, "string");
   assert.equal(typeof created.json().checksum, "string");
+  assert.deepEqual(created.json().permissions, ["environment"]);
   assert.ok(created.json().sizeBytes > 0);
+
+  const invalidPermissions = await app.inject({
+    method: "POST",
+    url: "/packages",
+    headers: { "x-admin-key": "package-key" },
+    payload: {
+      name: "sim-kernel-invalid",
+      version: "1.0.0",
+      runtime: "node",
+      entrypoint: "index.js",
+      permissions: ["root-access"],
+      content: "export function run(input){ return input; }"
+    }
+  });
+  assert.equal(invalidPermissions.statusCode, 400);
 
   const listed = await app.inject({
     method: "GET",

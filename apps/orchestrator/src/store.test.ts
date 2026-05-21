@@ -7,13 +7,16 @@ import {
   addTask,
   claimTask,
   configureAuditLogPersistence,
+  configureStatePersistence,
   configureStoreRuntime,
   findWorkerPackage,
   getWorker,
   getWorkerPackage,
   getAuditLog,
   getAuditPersistenceStatus,
+  getStatePersistenceStatus,
   getRecentVerdicts,
+  getTaskSnapshot,
   getNodeStats,
   heartbeatWorker,
   getTelemetrySnapshot,
@@ -72,12 +75,12 @@ test("task is marked failed after max attempts are exhausted", () => {
   assert.equal(telemetry.queue.expiredLeases, 2);
 });
 
-test("llm_inference tasks are claimed only by desktop_gpu nodes", () => {
+test("llm_inference tasks are claimed only by central llm desktop_gpu nodes", () => {
   resetStoreForTests();
 
   const llmTask = addTask({
     kind: "llm_inference",
-    payload: { prompt: "Summarize this" },
+    payload: { prompt: "Summarize this", modelVersion: "bio-llm-v1" },
     quorum: 1
   });
   const generalTask = addTask({ kind: "bio_prescreen", payload: { sample: "fallback" }, quorum: 1 });
@@ -97,6 +100,22 @@ test("llm_inference tasks are claimed only by desktop_gpu nodes", () => {
   const mobileClaimAgain = claimTask("node-mobile");
   assert.equal(mobileClaimAgain, null);
 
+  recordHeartbeat("node-gpu-generic", {
+    charging: true,
+    wifi: true,
+    idle: true,
+    userOptIn: true,
+    nodeClass: "desktop_gpu",
+    gpu: {
+      vendor: "nvidia",
+      model: "rtx-4080",
+      vramGb: 16
+    }
+  });
+
+  const genericGpuClaim = claimTask("node-gpu-generic");
+  assert.equal(genericGpuClaim, null);
+
   recordHeartbeat("node-gpu", {
     charging: true,
     wifi: true,
@@ -107,12 +126,102 @@ test("llm_inference tasks are claimed only by desktop_gpu nodes", () => {
       vendor: "nvidia",
       model: "rtx-4090",
       vramGb: 24
+    },
+    llm: {
+      role: "central_host",
+      modelVersions: ["bio-llm-v1"]
     }
   });
 
   const gpuClaim = claimTask("node-gpu");
   assert.equal(gpuClaim?.id, llmTask.id);
   assert.equal(gpuClaim?.kind, "llm_inference");
+});
+
+test("llm_inference routing requires matching central model version", () => {
+  resetStoreForTests();
+
+  const llmTask = addTask({
+    kind: "llm_inference",
+    payload: { prompt: "Explain this sample", modelVersion: "bio-llm-v2" },
+    quorum: 1
+  });
+
+  recordHeartbeat("node-gpu-v1", {
+    charging: true,
+    wifi: true,
+    idle: true,
+    userOptIn: true,
+    nodeClass: "desktop_gpu",
+    gpu: {
+      vendor: "nvidia",
+      model: "rtx-4090",
+      vramGb: 24
+    },
+    llm: {
+      role: "central_host",
+      modelVersions: ["bio-llm-v1"]
+    }
+  });
+
+  assert.equal(claimTask("node-gpu-v1"), null);
+
+  recordHeartbeat("node-gpu-v2", {
+    charging: true,
+    wifi: true,
+    idle: true,
+    userOptIn: true,
+    nodeClass: "desktop_gpu",
+    gpu: {
+      vendor: "nvidia",
+      model: "rtx-5090",
+      vramGb: 32
+    },
+    llm: {
+      role: "central_host",
+      modelVersions: ["bio-llm-v2", "bio-llm-v3"]
+    }
+  });
+
+  const claim = claimTask("node-gpu-v2");
+  assert.equal(claim?.id, llmTask.id);
+});
+
+test("claimTask respects supported task kinds filter", () => {
+  resetStoreForTests();
+
+  const llmTask = addTask({
+    kind: "llm_inference",
+    payload: { prompt: "Route only llm", modelVersion: "bio-llm-v1" },
+    quorum: 1
+  });
+
+  recordHeartbeat("node-central-filter", {
+    charging: true,
+    wifi: true,
+    idle: true,
+    userOptIn: true,
+    nodeClass: "desktop_gpu",
+    gpu: {
+      vendor: "nvidia",
+      model: "rtx-5090",
+      vramGb: 32
+    },
+    llm: {
+      role: "central_host",
+      modelVersions: ["bio-llm-v1"]
+    }
+  });
+
+  const denied = claimTask("node-central-filter", {
+    supportedKinds: new Set(["bio_prescreen", "package_execute"])
+  });
+  assert.equal(denied, null);
+
+  const allowed = claimTask("node-central-filter", {
+    supportedKinds: new Set(["llm_inference"])
+  });
+  assert.equal(allowed?.id, llmTask.id);
 });
 
 test("heartbeat updates node stats and active node count", () => {
@@ -363,6 +472,21 @@ test("worker package registry includes signature when PACKAGE_SIGNING_KEY is set
   }
 });
 
+test("worker package registry stores declared permissions", () => {
+  resetStoreForTests();
+
+  const created = registerWorkerPackage({
+    name: "policy-kernel",
+    version: "1.0.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    permissions: ["environment", "filesystem"],
+    content: "export const policy = true;"
+  });
+
+  assert.deepEqual(created.permissions, ["environment", "filesystem"]);
+});
+
 test("worker package registry resolves by name and optional version", () => {
   resetStoreForTests();
 
@@ -468,4 +592,71 @@ test("listWorkers supports errorsOnly filtering", () => {
   const errorWorkers = listWorkers({ limit: 10, errorsOnly: true });
   assert.equal(errorWorkers.length, 1);
   assert.equal(errorWorkers[0].workerId, "worker-err");
+});
+
+test("addTask signs task envelope when TASK_SIGNING_KEY is set", () => {
+  resetStoreForTests();
+  const previousKey = process.env.TASK_SIGNING_KEY;
+  const previousTtl = process.env.TASK_SIGNATURE_TTL_MS;
+  process.env.TASK_SIGNING_KEY = "task-sign-key";
+  process.env.TASK_SIGNATURE_TTL_MS = "60000";
+
+  try {
+    const task = addTask({ kind: "bio_prescreen", payload: { sample: "signed" }, quorum: 1 });
+    assert.equal(task.signatureAlgorithm, "hmac-sha256");
+    assert.equal(typeof task.signature, "string");
+    assert.equal(typeof task.expiresAt, "string");
+  } finally {
+    if (typeof previousKey === "string") {
+      process.env.TASK_SIGNING_KEY = previousKey;
+    } else {
+      delete process.env.TASK_SIGNING_KEY;
+    }
+
+    if (typeof previousTtl === "string") {
+      process.env.TASK_SIGNATURE_TTL_MS = previousTtl;
+    } else {
+      delete process.env.TASK_SIGNATURE_TTL_MS;
+    }
+  }
+});
+
+test("state snapshot persistence saves and reloads queue state", () => {
+  resetStoreForTests();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bio-swarm-state-"));
+  const file = path.join(dir, "state.json");
+
+  configureStatePersistence(file);
+
+  const task = addTask({ kind: "bio_prescreen", payload: { sample: "persist-state" }, quorum: 1 });
+  const claim = claimTask("node-state");
+  assert.equal(claim?.id, task.id);
+  registerWorker({
+    workerId: "worker-state",
+    nodeId: "node-state",
+    agentVersion: "worker/0.1.0",
+    platform: "darwin-arm64",
+    status: "running"
+  });
+  registerWorkerPackage({
+    name: "state-kernel",
+    version: "1.0.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    content: "export const ok = true;"
+  });
+
+  const statusBefore = getStatePersistenceStatus();
+  assert.equal(statusBefore.enabled, true);
+  assert.equal(statusBefore.fileExists, true);
+
+  resetStoreForTests();
+  configureStatePersistence(file);
+
+  const restoredTask = getTaskSnapshot(task.id);
+  assert.equal(restoredTask?.task.id, task.id);
+  assert.equal(restoredTask?.state, "leased");
+  assert.equal(getWorker("worker-state")?.workerId, "worker-state");
+  assert.equal(getWorkerPackage(listWorkerPackages(10)[0].packageId)?.name, "state-kernel");
+  assert.equal(getNodeStats("node-state").lastSeenAt !== null, true);
 });

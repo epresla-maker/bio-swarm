@@ -38,10 +38,13 @@ Phones execute only lightweight work units such as:
 - biomedical data preprocessing
 
 Desktop GPU nodes handle heavier task-level inference units such as `llm_inference`.
+`llm_inference` tasks are routed only to desktop GPU nodes that explicitly advertise central LLM host capability and, when requested, the matching `modelVersion`.
 Workers can also run centrally managed package tasks via `package_execute`.
 `package_execute` accepts either `packageId` or `packageName` (+ optional `packageVersion`) and workers cache downloaded packages in-memory by `packageId`. Optional package `signature` can be passed in task payload.
 For safety, package execution is blocked when runtime is unsupported or when package content contains dangerous Node API usage patterns (for example `child_process`, `fs`, `net`, `dns`, `process.env`).
 When package signing is enabled, workers verify package signatures (`hmac-sha256`) before execution.
+Packages can declare explicit permissions (`filesystem`, `network`, `environment`), and workers enforce these declarations against content inspection and runtime policy.
+Workers can run in hardened agent modes (`full`, `mobile_safe`, `package_worker`, `llm_central`) that restrict claimable and executable task kinds.
 
 Execution is allowed when policy permits:
 
@@ -58,6 +61,9 @@ The orchestrator performs:
 - node coordination and telemetry aggregation
 - quorum validation from multiple independent node results
 - heavy model and simulation handoff (future)
+
+When task signing is enabled, the orchestrator signs task envelopes and workers verify them before execution.
+The orchestrator can also persist queue, node, worker and package registry state to a local snapshot file and restore it on restart.
 
 ## Threat Model (MVP)
 
@@ -163,10 +169,10 @@ The orchestrator performs:
 - `POST /nodes/:id/enable` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /telemetry`
 - `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
-- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns task/node/worker summaries, recent worker snapshots, recent verdicts, recent audit items, and audit persistence status)
+- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns task/node/worker summaries, recent worker snapshots, recent verdicts, recent audit items, and audit/state persistence status)
 - `GET /admin/dashboard` (requires header `x-admin-key: <ADMIN_API_KEY>`, highlights attention tasks and nodes for operators with reason-specific metrics)
 - `GET /admin/dashboard/ui` (browser UI shell for operators; enter admin key in page to fetch `/admin/dashboard`)
-- `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum and optional signature)
+- `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum, optional signature, and declared permissions)
 - `GET /packages?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists registered worker packages)
 - `GET /packages/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns package metadata + content + optional signature fields)
 - `GET /packages/resolve?name=...&version=...` (requires header `x-admin-key: <ADMIN_API_KEY>`, resolves package by name with optional exact version; without version returns latest, includes optional signature fields)
@@ -194,13 +200,25 @@ Orchestrator:
 - `AUDIT_LOG_MAX_BYTES` (default `5000000`)
 - `AUDIT_LOG_MAX_FILES` (default `5`)
 - `AUDIT_LOG_RETENTION_DAYS` (default `30`, rotated files older than this are removed)
+- `STATE_SNAPSHOT_PATH` (default `./data/state-snapshot.json`, persists queue, nodes, workers, verdict history and package registry across orchestrator restarts)
 - `PACKAGE_SIGNING_KEY` (optional, enables `hmac-sha256` package signatures in package registry responses)
+- `TASK_SIGNING_KEY` (optional, enables `hmac-sha256` signatures on task envelopes)
+- `TASK_SIGNATURE_TTL_MS` (default `3600000`, expiry window for signed task envelopes)
 
 Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)
 - `NODE_ID` (default random `node-xxxxxxxx`)
 - `EDGE_ADMIN_API_KEY` (optional, used by worker to download registered packages from `/packages/:id`)
 - `EDGE_PACKAGE_SIGNING_KEY` (optional, when set worker enforces package signature verification before execution)
+- `EDGE_TASK_SIGNING_KEY` (optional, when set worker enforces signed task envelope verification before execution)
+- `EDGE_PACKAGE_POLICY_MODE` (`strict` default, `relaxed` allows declared permissions without allowlist denial)
+- `EDGE_ALLOWED_PACKAGE_PERMISSIONS` (comma-separated allowlist used in `strict` mode, e.g. `environment,network`)
+- `EDGE_AGENT_MODE` (default `full`; available: `full`, `mobile_safe`, `package_worker`, `llm_central`)
+- `EDGE_ALLOWED_TASK_KINDS` (optional comma-separated explicit task allowlist override, e.g. `package_execute,llm_inference`)
+- `EDGE_LLM_ROLE` (optional, set to `central_host` on the main machine that serves full-model LLM inference)
+- `EDGE_LLM_MODEL_VERSIONS` (comma-separated model versions advertised by the central LLM host, e.g. `bio-llm-v1,bio-llm-v2`)
+- `EDGE_LLM_MAX_CONTEXT_TOKENS` (optional capability metadata for central LLM hosts)
+- `EDGE_LLM_CONCURRENCY` (optional capability metadata for central LLM hosts)
 - `EDGE_AGENT_VERSION` (optional, worker version string sent during `/workers/register`)
 - `EDGE_PROFILE` (`mobile` default, `desktop-gpu` enables desktop GPU capability mode)
 - `EDGE_GPU_VENDOR` (used when `EDGE_PROFILE=desktop-gpu`)
