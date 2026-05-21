@@ -1515,12 +1515,35 @@ test("package registry API creates, lists and fetches packages", async (t) => {
   assert.equal(fetched.json().packageId, created.json().packageId);
   assert.equal(typeof fetched.json().content, "string");
 
+  const resolvedByName = await app.inject({
+    method: "GET",
+    url: "/packages/resolve?name=sim-kernel",
+    headers: { "x-admin-key": "package-key" }
+  });
+  assert.equal(resolvedByName.statusCode, 200);
+  assert.equal(resolvedByName.json().packageId, created.json().packageId);
+
+  const resolvedByVersion = await app.inject({
+    method: "GET",
+    url: "/packages/resolve?name=sim-kernel&version=1.0.0",
+    headers: { "x-admin-key": "package-key" }
+  });
+  assert.equal(resolvedByVersion.statusCode, 200);
+  assert.equal(resolvedByVersion.json().packageId, created.json().packageId);
+
   const missing = await app.inject({
     method: "GET",
     url: "/packages/missing",
     headers: { "x-admin-key": "package-key" }
   });
   assert.equal(missing.statusCode, 404);
+
+  const missingResolved = await app.inject({
+    method: "GET",
+    url: "/packages/resolve?name=sim-kernel&version=9.9.9",
+    headers: { "x-admin-key": "package-key" }
+  });
+  assert.equal(missingResolved.statusCode, 404);
 });
 
 test("worker registry API registers, heartbeats, lists and fetches workers", async (t) => {
@@ -1562,12 +1585,22 @@ test("worker registry API registers, heartbeats, lists and fetches workers", asy
       status: "idle",
       packageCount: 2,
       lastPackageId: "pkg-1",
-      lastPackageChecksum: "abc123"
+      lastPackageVersion: "1.1.0",
+      lastPackageChecksum: "abc123",
+      lastTaskId: "task-42",
+      lastTaskKind: "package_execute",
+      lastExecutionStatus: "completed",
+      lastExecutionError: ""
     }
   });
   assert.equal(heartbeat.statusCode, 200);
   assert.equal(heartbeat.json().status, "idle");
   assert.equal(heartbeat.json().packageCount, 2);
+  assert.equal(heartbeat.json().lastPackageVersion, "1.1.0");
+  assert.equal(heartbeat.json().lastTaskId, "task-42");
+  assert.equal(heartbeat.json().lastTaskKind, "package_execute");
+  assert.equal(heartbeat.json().lastExecutionStatus, "completed");
+  assert.equal(heartbeat.json().lastExecutionError, null);
 
   const listed = await app.inject({
     method: "GET",
@@ -1586,6 +1619,7 @@ test("worker registry API registers, heartbeats, lists and fetches workers", asy
   assert.equal(fetched.statusCode, 200);
   assert.equal(fetched.json().workerId, "worker-1");
   assert.equal(fetched.json().status, "idle");
+  assert.equal(fetched.json().lastTaskId, "task-42");
 
   const missing = await app.inject({
     method: "GET",

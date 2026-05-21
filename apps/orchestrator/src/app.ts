@@ -17,6 +17,7 @@ import {
   listTaskResults,
   listNodeSnapshots,
   listTaskSnapshots,
+  findWorkerPackage,
   getNodeStats,
   getRecentVerdicts,
   getTaskSnapshot,
@@ -299,7 +300,12 @@ export function buildApp(options?: {
       platform?: string;
       packageCount?: number;
       lastPackageId?: string;
+      lastPackageVersion?: string;
       lastPackageChecksum?: string;
+      lastTaskId?: string;
+      lastTaskKind?: string;
+      lastExecutionStatus?: string;
+      lastExecutionError?: string;
       status?: string;
       lastResultAt?: string;
     };
@@ -323,7 +329,12 @@ export function buildApp(options?: {
       platform,
       packageCount: request.body.packageCount,
       lastPackageId: request.body.lastPackageId,
+      lastPackageVersion: request.body.lastPackageVersion,
       lastPackageChecksum: request.body.lastPackageChecksum,
+      lastTaskId: request.body.lastTaskId,
+      lastTaskKind: request.body.lastTaskKind,
+      lastExecutionStatus: request.body.lastExecutionStatus,
+      lastExecutionError: request.body.lastExecutionError,
       status: request.body.status,
       lastResultAt: request.body.lastResultAt
     });
@@ -336,7 +347,12 @@ export function buildApp(options?: {
     Body: {
       packageCount?: number;
       lastPackageId?: string;
+      lastPackageVersion?: string;
       lastPackageChecksum?: string;
+      lastTaskId?: string;
+      lastTaskKind?: string;
+      lastExecutionStatus?: string;
+      lastExecutionError?: string;
       status?: string;
       lastResultAt?: string;
     };
@@ -348,7 +364,12 @@ export function buildApp(options?: {
     const worker = heartbeatWorker(request.params.id, {
       packageCount: request.body.packageCount,
       lastPackageId: request.body.lastPackageId,
+      lastPackageVersion: request.body.lastPackageVersion,
       lastPackageChecksum: request.body.lastPackageChecksum,
+      lastTaskId: request.body.lastTaskId,
+      lastTaskKind: request.body.lastTaskKind,
+      lastExecutionStatus: request.body.lastExecutionStatus,
+      lastExecutionError: request.body.lastExecutionError,
       status: request.body.status,
       lastResultAt: request.body.lastResultAt
     });
@@ -384,6 +405,25 @@ export function buildApp(options?: {
     }
 
     return reply.status(200).send(worker);
+  });
+
+  app.get<{ Querystring: { name?: string; version?: string } }>("/packages/resolve", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const name = request.query.name?.trim();
+    const version = request.query.version?.trim();
+    if (!name) {
+      return reply.status(400).send({ error: "invalid_package_name" });
+    }
+
+    const resolved = findWorkerPackage({ name, version });
+    if (!resolved) {
+      return reply.status(404).send({ error: "package_not_found" });
+    }
+
+    return reply.status(200).send(resolved);
   });
 
   app.post<{

@@ -21,6 +21,19 @@ export interface EdgeRuntimeDeps {
   log: Pick<Console, "log" | "error">;
 }
 
+interface WorkerHeartbeatTelemetry {
+  packageCount?: number;
+  lastPackageId?: string;
+  lastPackageVersion?: string;
+  lastPackageChecksum?: string;
+  lastTaskId?: string;
+  lastTaskKind?: string;
+  lastExecutionStatus?: string;
+  lastExecutionError?: string;
+  status?: string;
+  lastResultAt?: string;
+}
+
 export const defaultCapabilities: NodeCapabilities = {
   charging: true,
   wifi: true,
@@ -35,6 +48,26 @@ export const defaultDeps: EdgeRuntimeDeps = {
   clearIntervalFn: clearInterval,
   log: console
 };
+
+interface ResolvedWorkerPackage {
+  packageId: string;
+  name: string | null;
+  version: string | null;
+  checksum: string;
+  runtime: string;
+  entrypoint: string;
+  content: string;
+}
+
+const packageCache = new Map<string, ResolvedWorkerPackage>();
+
+const blockedPackagePatterns: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /node:child_process|\bchild_process\b/, reason: "child_process_blocked" },
+  { pattern: /node:fs|\bfs\b/, reason: "filesystem_access_blocked" },
+  { pattern: /node:net|\bnet\b/, reason: "network_socket_access_blocked" },
+  { pattern: /node:dns|\bdns\b/, reason: "dns_access_blocked" },
+  { pattern: /process\.env/, reason: "process_env_access_blocked" }
+];
 
 export function canProcess(input: NodeCapabilities): boolean {
   if (!input.userOptIn || !input.wifi) {
@@ -172,7 +205,9 @@ export async function registerWorker(config: EdgeRuntimeConfig, deps: EdgeRuntim
         nodeId: config.nodeId,
         agentVersion: config.agentVersion ?? "edge-runtime/0.1.0",
         platform: config.platform ?? "unknown",
-        status: "running"
+        status: "running",
+        packageCount: packageCache.size,
+        lastExecutionStatus: "idle"
       })
     });
   } catch (error) {
@@ -188,7 +223,11 @@ export async function registerWorker(config: EdgeRuntimeConfig, deps: EdgeRuntim
   return true;
 }
 
-export async function sendWorkerHeartbeat(config: EdgeRuntimeConfig, deps: EdgeRuntimeDeps): Promise<boolean> {
+export async function sendWorkerHeartbeat(
+  config: EdgeRuntimeConfig,
+  deps: EdgeRuntimeDeps,
+  telemetry?: WorkerHeartbeatTelemetry
+): Promise<boolean> {
   if (!config.adminApiKey) {
     return false;
   }
@@ -201,7 +240,18 @@ export async function sendWorkerHeartbeat(config: EdgeRuntimeConfig, deps: EdgeR
         "content-type": "application/json",
         "x-admin-key": config.adminApiKey
       },
-      body: JSON.stringify({ status: "running" })
+      body: JSON.stringify({
+        status: telemetry?.status ?? "running",
+        packageCount: telemetry?.packageCount ?? packageCache.size,
+        lastPackageId: telemetry?.lastPackageId,
+        lastPackageVersion: telemetry?.lastPackageVersion,
+        lastPackageChecksum: telemetry?.lastPackageChecksum,
+        lastTaskId: telemetry?.lastTaskId,
+        lastTaskKind: telemetry?.lastTaskKind,
+        lastExecutionStatus: telemetry?.lastExecutionStatus,
+        lastExecutionError: telemetry?.lastExecutionError,
+        lastResultAt: telemetry?.lastResultAt
+      })
     });
   } catch (error) {
     deps.log.error("[edge-runtime] worker heartbeat network error", error);
@@ -263,6 +313,12 @@ export async function runEdgeRuntime(config: EdgeRuntimeConfig, deps: EdgeRuntim
   void registerWorker(config, deps);
   startHeartbeatLoop(config, deps);
 
+  let lastTelemetry: WorkerHeartbeatTelemetry = {
+    status: "running",
+    lastExecutionStatus: "idle",
+    packageCount: packageCache.size
+  };
+
   while (true) {
     if (!canProcess(config.capabilities)) {
       await deps.waitFn(config.idleSleepMs);
@@ -275,8 +331,33 @@ export async function runEdgeRuntime(config: EdgeRuntimeConfig, deps: EdgeRuntim
       continue;
     }
 
+    lastTelemetry = {
+      ...lastTelemetry,
+      status: "running",
+      lastTaskId: task.id,
+      lastTaskKind: task.kind,
+      lastExecutionStatus: "processing"
+    };
+    void sendWorkerHeartbeat(config, deps, lastTelemetry);
+
     const result = await processTask(task, config.nodeId, config, deps);
-    await submitResult(config, task.id, result, deps);
+    const submitted = await submitResult(config, task.id, result, deps);
+
+    const resultPayload = (result.payload ?? {}) as Record<string, unknown>;
+    const executionError = typeof resultPayload.error === "string" ? resultPayload.error : null;
+    lastTelemetry = {
+      status: "running",
+      packageCount: packageCache.size,
+      lastTaskId: task.id,
+      lastTaskKind: task.kind,
+      lastPackageId: typeof resultPayload.packageId === "string" ? resultPayload.packageId : undefined,
+      lastPackageVersion: typeof resultPayload.packageVersion === "string" ? resultPayload.packageVersion : undefined,
+      lastPackageChecksum: typeof result.checksum === "string" ? result.checksum : undefined,
+      lastExecutionStatus: submitted ? (executionError ? "completed_with_error" : "completed") : "submit_failed",
+      lastExecutionError: executionError ?? undefined,
+      lastResultAt: new Date().toISOString()
+    };
+    void sendWorkerHeartbeat(config, deps, lastTelemetry);
   }
 }
 
@@ -285,17 +366,52 @@ async function executePackageTask(
   config: EdgeRuntimeConfig | undefined,
   deps: EdgeRuntimeDeps
 ): Promise<Record<string, unknown> & { score: number }> {
-  const packageId = typeof payload.packageId === "string" ? payload.packageId : null;
+  const packageIdInput = typeof payload.packageId === "string" ? payload.packageId.trim() : "";
+  const packageNameInput = typeof payload.packageName === "string" ? payload.packageName.trim() : "";
+  const packageVersionInput = typeof payload.packageVersion === "string" ? payload.packageVersion.trim() : "";
   const expectedChecksum = typeof payload.checksum === "string" ? payload.checksum : null;
 
-  if (!packageId || !config) {
+  if (!config) {
     return {
       score: 0,
-      error: "invalid_package_task_payload"
+      error: "missing_runtime_config"
     };
   }
 
-  const pkg = await fetchWorkerPackage(config, deps, packageId);
+  let packageId = packageIdInput;
+  let resolvedVersion: string | null = null;
+  let checksumToVerify = expectedChecksum;
+
+  if (!packageId) {
+    if (!packageNameInput) {
+      return {
+        score: 0,
+        error: "invalid_package_task_payload"
+      };
+    }
+
+    const resolved = await resolveWorkerPackage(config, deps, {
+      name: packageNameInput,
+      version: packageVersionInput || undefined
+    });
+
+    if (!resolved) {
+      return {
+        score: 0,
+        packageName: packageNameInput,
+        packageVersion: packageVersionInput || null,
+        error: "package_resolve_failed"
+      };
+    }
+
+    packageId = resolved.packageId;
+    resolvedVersion = resolved.version;
+    if (!checksumToVerify) {
+      checksumToVerify = resolved.checksum;
+    }
+  }
+
+  const pkg = await loadWorkerPackage(config, deps, packageId, checksumToVerify ?? undefined);
   if (!pkg) {
     return {
       score: 0,
@@ -305,13 +421,24 @@ async function executePackageTask(
   }
 
   const downloadedChecksum = String(pkg.checksum ?? "");
-  if (expectedChecksum && expectedChecksum !== downloadedChecksum) {
+  if (checksumToVerify && checksumToVerify !== downloadedChecksum) {
     return {
       score: 0,
       packageId,
       error: "checksum_mismatch",
-      expectedChecksum,
+      expectedChecksum: checksumToVerify,
       downloadedChecksum
+    };
+  }
+
+  const sandboxViolation = getPackageSandboxViolation(pkg);
+  if (sandboxViolation) {
+    return {
+      score: 0,
+      packageId,
+      packageVersion: resolvedVersion ?? pkg.version,
+      error: "sandbox_blocked",
+      reason: sandboxViolation
     };
   }
 
@@ -324,6 +451,7 @@ async function executePackageTask(
   return {
     score: 0.9,
     packageId,
+    packageVersion: resolvedVersion ?? pkg.version,
     checksumVerified: true,
     runtime: pkg.runtime,
     entrypoint: pkg.entrypoint,
@@ -334,20 +462,97 @@ async function executePackageTask(
   };
 }
 
-async function fetchWorkerPackage(
+function getPackageSandboxViolation(pkg: ResolvedWorkerPackage): string | null {
+  if (pkg.runtime !== "node") {
+    return "unsupported_runtime";
+  }
+
+  for (const blocked of blockedPackagePatterns) {
+    if (blocked.pattern.test(pkg.content)) {
+      return blocked.reason;
+    }
+  }
+
+  return null;
+}
+
+async function resolveWorkerPackage(
   config: EdgeRuntimeConfig,
   deps: EdgeRuntimeDeps,
-  packageId: string
-): Promise<{ checksum: string; runtime: string; entrypoint: string; content: string } | null> {
-  const headers: Record<string, string> = {};
-  if (config.adminApiKey) {
-    headers["x-admin-key"] = config.adminApiKey;
+  input: { name: string; version?: string }
+): Promise<ResolvedWorkerPackage | null> {
+  const params = new URLSearchParams({ name: input.name });
+  if (input.version) {
+    params.set("version", input.version);
   }
 
   let response: Response;
   try {
+    response = await deps.fetchFn(`${config.orchestratorUrl}/packages/resolve?${params.toString()}`, {
+      headers: buildAdminHeaders(config)
+    });
+  } catch (error) {
+    deps.log.error("[edge-runtime] package resolve network error", error);
+    return null;
+  }
+
+  if (!response.ok) {
+    deps.log.error("[edge-runtime] package resolve failed", response.status);
+    return null;
+  }
+
+  const parsed = (await response.json()) as Record<string, unknown>;
+  if (
+    typeof parsed.packageId !== "string" ||
+    typeof parsed.checksum !== "string" ||
+    typeof parsed.runtime !== "string" ||
+    typeof parsed.entrypoint !== "string" ||
+    typeof parsed.content !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    packageId: parsed.packageId,
+    name: typeof parsed.name === "string" ? parsed.name : null,
+    version: typeof parsed.version === "string" ? parsed.version : null,
+    checksum: parsed.checksum,
+    runtime: parsed.runtime,
+    entrypoint: parsed.entrypoint,
+    content: parsed.content
+  };
+}
+
+async function loadWorkerPackage(
+  config: EdgeRuntimeConfig,
+  deps: EdgeRuntimeDeps,
+  packageId: string,
+  expectedChecksum?: string
+): Promise<ResolvedWorkerPackage | null> {
+  const cached = packageCache.get(packageId);
+  if (cached && (!expectedChecksum || cached.checksum === expectedChecksum)) {
+    return cached;
+  }
+
+  const fetched = await fetchWorkerPackage(config, deps, packageId);
+  if (!fetched) {
+    return null;
+  }
+
+  packageCache.set(packageId, fetched);
+  return fetched;
+}
+
+async function fetchWorkerPackage(
+  config: EdgeRuntimeConfig,
+  deps: EdgeRuntimeDeps,
+  packageId: string
+): Promise<ResolvedWorkerPackage | null> {
+
+  let response: Response;
+  try {
     response = await deps.fetchFn(`${config.orchestratorUrl}/packages/${packageId}`, {
-      headers
+      headers: buildAdminHeaders(config)
     });
   } catch (error) {
     deps.log.error("[edge-runtime] package fetch network error", error);
@@ -361,6 +566,7 @@ async function fetchWorkerPackage(
 
   const parsed = (await response.json()) as Record<string, unknown>;
   if (
+    typeof parsed.packageId !== "string" ||
     typeof parsed.checksum !== "string" ||
     typeof parsed.runtime !== "string" ||
     typeof parsed.entrypoint !== "string" ||
@@ -370,11 +576,26 @@ async function fetchWorkerPackage(
   }
 
   return {
+    packageId: parsed.packageId,
+    name: typeof parsed.name === "string" ? parsed.name : null,
+    version: typeof parsed.version === "string" ? parsed.version : null,
     checksum: parsed.checksum,
     runtime: parsed.runtime,
     entrypoint: parsed.entrypoint,
     content: parsed.content
   };
+}
+
+function buildAdminHeaders(config: EdgeRuntimeConfig): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (config.adminApiKey) {
+    headers["x-admin-key"] = config.adminApiKey;
+  }
+  return headers;
+}
+
+export function resetPackageCacheForTests(): void {
+  packageCache.clear();
 }
 
 function mockMoleculeScore(payload: Record<string, unknown>): number {

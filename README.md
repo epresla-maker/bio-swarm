@@ -39,6 +39,8 @@ Phones execute only lightweight work units such as:
 
 Desktop GPU nodes handle heavier task-level inference units such as `llm_inference`.
 Workers can also run centrally managed package tasks via `package_execute`.
+`package_execute` accepts either `packageId` or `packageName` (+ optional `packageVersion`) and workers cache downloaded packages in-memory by `packageId`.
+For safety, package execution is blocked when runtime is unsupported or when package content contains dangerous Node API usage patterns (for example `child_process`, `fs`, `net`, `dns`, `process.env`).
 
 Execution is allowed when policy permits:
 
@@ -166,8 +168,9 @@ The orchestrator performs:
 - `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum)
 - `GET /packages?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists registered worker packages)
 - `GET /packages/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns package metadata + content)
+- `GET /packages/resolve?name=...&version=...` (requires header `x-admin-key: <ADMIN_API_KEY>`, resolves package by name with optional exact version; without version returns latest)
 - `POST /workers/register` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers worker agent metadata)
-- `POST /workers/:id/heartbeat` (requires header `x-admin-key: <ADMIN_API_KEY>`, updates worker runtime status)
+- `POST /workers/:id/heartbeat` (requires header `x-admin-key: <ADMIN_API_KEY>`, updates worker runtime status and last execution telemetry such as `lastTaskId`, `lastTaskKind`, `lastExecutionStatus`, `lastExecutionError`)
 - `GET /workers?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists worker agents)
 - `GET /workers/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns worker snapshot)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)

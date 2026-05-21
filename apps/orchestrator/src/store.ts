@@ -203,7 +203,12 @@ interface WorkerRecord {
   platform: string;
   packageCount: number;
   lastPackageId: string | null;
+  lastPackageVersion: string | null;
   lastPackageChecksum: string | null;
+  lastTaskId: string | null;
+  lastTaskKind: string | null;
+  lastExecutionStatus: string;
+  lastExecutionError: string | null;
   status: string;
   lastResultAt: string | null;
   registeredAt: string;
@@ -217,7 +222,12 @@ export interface WorkerSnapshot {
   platform: string;
   packageCount: number;
   lastPackageId: string | null;
+  lastPackageVersion: string | null;
   lastPackageChecksum: string | null;
+  lastTaskId: string | null;
+  lastTaskKind: string | null;
+  lastExecutionStatus: string;
+  lastExecutionError: string | null;
   status: string;
   lastResultAt: string | null;
   registeredAt: string;
@@ -559,6 +569,69 @@ export function getWorkerPackage(packageId: string): (WorkerPackageView & { cont
     ...toWorkerPackageView(record),
     content: record.content
   };
+}
+
+export function findWorkerPackage(input: {
+  name: string;
+  version?: string;
+}): (WorkerPackageView & { content: string }) | null {
+  const name = input.name.trim();
+  if (!name) {
+    return null;
+  }
+
+  const version = typeof input.version === "string" ? input.version.trim() : "";
+  const candidates = Array.from(workerPackages.values()).filter((item) => {
+    if (item.name !== name) {
+      return false;
+    }
+
+    if (version && item.version !== version) {
+      return false;
+    }
+
+    return true;
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((a, b) => {
+    const createdAtDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (createdAtDiff !== 0) {
+      return createdAtDiff;
+    }
+
+    const versionDiff = compareDotVersionsDesc(a.version, b.version);
+    if (versionDiff !== 0) {
+      return versionDiff;
+    }
+
+    return b.packageId.localeCompare(a.packageId);
+  });
+  const selected = candidates[0];
+
+  return {
+    ...toWorkerPackageView(selected),
+    content: selected.content
+  };
+}
+
+function compareDotVersionsDesc(a: string, b: string): number {
+  const aParts = a.split(".").map((part) => Number.parseInt(part, 10));
+  const bParts = b.split(".").map((part) => Number.parseInt(part, 10));
+  const length = Math.max(aParts.length, bParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const left = Number.isFinite(aParts[index]) ? aParts[index] : 0;
+    const right = Number.isFinite(bParts[index]) ? bParts[index] : 0;
+    if (left !== right) {
+      return right - left;
+    }
+  }
+
+  return b.localeCompare(a);
 }
 
 function toWorkerPackageView(item: WorkerPackageRecord): WorkerPackageView {
@@ -1067,7 +1140,12 @@ export function registerWorker(input: {
   platform: string;
   packageCount?: number;
   lastPackageId?: string;
+  lastPackageVersion?: string;
   lastPackageChecksum?: string;
+  lastTaskId?: string;
+  lastTaskKind?: string;
+  lastExecutionStatus?: string;
+  lastExecutionError?: string;
   status?: string;
   lastResultAt?: string;
 }): WorkerSnapshot {
@@ -1083,9 +1161,23 @@ export function registerWorker(input: {
     packageCount: typeof input.packageCount === "number" && Number.isFinite(input.packageCount) ? Math.max(0, Math.floor(input.packageCount)) : 0,
     lastPackageId:
       typeof input.lastPackageId === "string" && input.lastPackageId.trim().length > 0 ? input.lastPackageId.trim() : null,
+    lastPackageVersion:
+      typeof input.lastPackageVersion === "string" && input.lastPackageVersion.trim().length > 0
+        ? input.lastPackageVersion.trim()
+        : null,
     lastPackageChecksum:
       typeof input.lastPackageChecksum === "string" && input.lastPackageChecksum.trim().length > 0
         ? input.lastPackageChecksum.trim()
+        : null,
+    lastTaskId: typeof input.lastTaskId === "string" && input.lastTaskId.trim().length > 0 ? input.lastTaskId.trim() : null,
+    lastTaskKind: typeof input.lastTaskKind === "string" && input.lastTaskKind.trim().length > 0 ? input.lastTaskKind.trim() : null,
+    lastExecutionStatus:
+      typeof input.lastExecutionStatus === "string" && input.lastExecutionStatus.trim().length > 0
+        ? input.lastExecutionStatus.trim()
+        : "idle",
+    lastExecutionError:
+      typeof input.lastExecutionError === "string" && input.lastExecutionError.trim().length > 0
+        ? input.lastExecutionError.trim()
         : null,
     status: typeof input.status === "string" && input.status.trim().length > 0 ? input.status.trim() : "idle",
     lastResultAt:
@@ -1103,7 +1195,12 @@ export function heartbeatWorker(
   input: {
     packageCount?: number;
     lastPackageId?: string;
+    lastPackageVersion?: string;
     lastPackageChecksum?: string;
+    lastTaskId?: string;
+    lastTaskKind?: string;
+    lastExecutionStatus?: string;
+    lastExecutionError?: string;
     status?: string;
     lastResultAt?: string;
   }
@@ -1121,8 +1218,28 @@ export function heartbeatWorker(
     existing.lastPackageId = input.lastPackageId.trim().length > 0 ? input.lastPackageId.trim() : null;
   }
 
+  if (typeof input.lastPackageVersion === "string") {
+    existing.lastPackageVersion = input.lastPackageVersion.trim().length > 0 ? input.lastPackageVersion.trim() : null;
+  }
+
   if (typeof input.lastPackageChecksum === "string") {
     existing.lastPackageChecksum = input.lastPackageChecksum.trim().length > 0 ? input.lastPackageChecksum.trim() : null;
+  }
+
+  if (typeof input.lastTaskId === "string") {
+    existing.lastTaskId = input.lastTaskId.trim().length > 0 ? input.lastTaskId.trim() : null;
+  }
+
+  if (typeof input.lastTaskKind === "string") {
+    existing.lastTaskKind = input.lastTaskKind.trim().length > 0 ? input.lastTaskKind.trim() : null;
+  }
+
+  if (typeof input.lastExecutionStatus === "string" && input.lastExecutionStatus.trim().length > 0) {
+    existing.lastExecutionStatus = input.lastExecutionStatus.trim();
+  }
+
+  if (typeof input.lastExecutionError === "string") {
+    existing.lastExecutionError = input.lastExecutionError.trim().length > 0 ? input.lastExecutionError.trim() : null;
   }
 
   if (typeof input.status === "string" && input.status.trim().length > 0) {
@@ -1158,7 +1275,12 @@ function toWorkerSnapshot(item: WorkerRecord): WorkerSnapshot {
     platform: item.platform,
     packageCount: item.packageCount,
     lastPackageId: item.lastPackageId,
+    lastPackageVersion: item.lastPackageVersion,
     lastPackageChecksum: item.lastPackageChecksum,
+    lastTaskId: item.lastTaskId,
+    lastTaskKind: item.lastTaskKind,
+    lastExecutionStatus: item.lastExecutionStatus,
+    lastExecutionError: item.lastExecutionError,
     status: item.status,
     lastResultAt: item.lastResultAt,
     registeredAt: item.registeredAt,

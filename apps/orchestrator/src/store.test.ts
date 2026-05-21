@@ -8,6 +8,7 @@ import {
   claimTask,
   configureAuditLogPersistence,
   configureStoreRuntime,
+  findWorkerPackage,
   getWorker,
   getWorkerPackage,
   getAuditLog,
@@ -336,6 +337,35 @@ test("worker package registry stores and updates by name/version", () => {
   assert.equal(listWorkerPackages(10).length, 1);
 });
 
+test("worker package registry resolves by name and optional version", () => {
+  resetStoreForTests();
+
+  const v1 = registerWorkerPackage({
+    name: "sim-kernel",
+    version: "1.0.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    content: "export const v = '1.0.0';"
+  });
+
+  const v2 = registerWorkerPackage({
+    name: "sim-kernel",
+    version: "1.1.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    content: "export const v = '1.1.0';"
+  });
+
+  const latest = findWorkerPackage({ name: "sim-kernel" });
+  assert.equal(latest?.packageId, v2.packageId);
+
+  const exact = findWorkerPackage({ name: "sim-kernel", version: "1.0.0" });
+  assert.equal(exact?.packageId, v1.packageId);
+
+  const missing = findWorkerPackage({ name: "sim-kernel", version: "9.9.9" });
+  assert.equal(missing, null);
+});
+
 test("worker registry tracks registration and heartbeat updates", () => {
   resetStoreForTests();
 
@@ -360,11 +390,21 @@ test("worker registry tracks registration and heartbeat updates", () => {
     status: "idle",
     packageCount: 2,
     lastPackageId: "pkg-1",
-    lastPackageChecksum: "abc123"
+    lastPackageVersion: "1.1.0",
+    lastPackageChecksum: "abc123",
+    lastTaskId: "task-7",
+    lastTaskKind: "package_execute",
+    lastExecutionStatus: "completed",
+    lastExecutionError: ""
   });
   assert.equal(heartbeat?.status, "idle");
   assert.equal(heartbeat?.packageCount, 2);
   assert.equal(heartbeat?.lastPackageId, "pkg-1");
+  assert.equal(heartbeat?.lastPackageVersion, "1.1.0");
+  assert.equal(heartbeat?.lastTaskId, "task-7");
+  assert.equal(heartbeat?.lastTaskKind, "package_execute");
+  assert.equal(heartbeat?.lastExecutionStatus, "completed");
+  assert.equal(heartbeat?.lastExecutionError, null);
 
   const fetched = getWorker("worker-a");
   assert.equal(fetched?.workerId, "worker-a");
