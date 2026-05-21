@@ -13,6 +13,28 @@ interface TaskRecord {
   attempts: number;
 }
 
+interface WorkerPackageRecord {
+  packageId: string;
+  name: string;
+  version: string;
+  runtime: string;
+  entrypoint: string;
+  content: string;
+  checksum: string;
+  createdAt: string;
+}
+
+export interface WorkerPackageView {
+  packageId: string;
+  name: string;
+  version: string;
+  runtime: string;
+  entrypoint: string;
+  checksum: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
 export interface TaskSnapshot {
   task: SwarmTask;
   state: "pending" | "leased" | "completed" | "failed";
@@ -178,6 +200,7 @@ const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
 const nodeControlStates = new Map<string, NodeControlState>();
+const workerPackages = new Map<string, WorkerPackageRecord>();
 
 let leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
 let maxAttempts = Number(process.env.MAX_TASK_ATTEMPTS ?? 4);
@@ -240,6 +263,7 @@ export function resetStoreForTests(): void {
   nodeStats.clear();
   nodeCapabilities.clear();
   nodeControlStates.clear();
+  workerPackages.clear();
   retryCount = 0;
   expiredLeaseCount = 0;
   taskVerdicts.length = 0;
@@ -446,6 +470,78 @@ export function addTask(input: Omit<SwarmTask, "id" | "createdAt">): SwarmTask {
   });
 
   return task;
+}
+
+export function registerWorkerPackage(input: {
+  name: string;
+  version: string;
+  runtime: string;
+  entrypoint: string;
+  content: string;
+}): WorkerPackageView {
+  const createdAt = new Date(nowProvider()).toISOString();
+  const checksum = crypto.createHash("sha256").update(input.content).digest("hex");
+
+  const existing = Array.from(workerPackages.values()).find(
+    (item) => item.name === input.name && item.version === input.version
+  );
+
+  if (existing) {
+    existing.runtime = input.runtime;
+    existing.entrypoint = input.entrypoint;
+    existing.content = input.content;
+    existing.checksum = checksum;
+    existing.createdAt = createdAt;
+    return toWorkerPackageView(existing);
+  }
+
+  const packageId = crypto.randomUUID();
+  const record: WorkerPackageRecord = {
+    packageId,
+    name: input.name,
+    version: input.version,
+    runtime: input.runtime,
+    entrypoint: input.entrypoint,
+    content: input.content,
+    checksum,
+    createdAt
+  };
+
+  workerPackages.set(packageId, record);
+  return toWorkerPackageView(record);
+}
+
+export function listWorkerPackages(limit: number): WorkerPackageView[] {
+  const bounded = Math.max(1, Math.min(200, Math.floor(limit)));
+  return Array.from(workerPackages.values())
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, bounded)
+    .map((item) => toWorkerPackageView(item));
+}
+
+export function getWorkerPackage(packageId: string): (WorkerPackageView & { content: string }) | null {
+  const record = workerPackages.get(packageId);
+  if (!record) {
+    return null;
+  }
+
+  return {
+    ...toWorkerPackageView(record),
+    content: record.content
+  };
+}
+
+function toWorkerPackageView(item: WorkerPackageRecord): WorkerPackageView {
+  return {
+    packageId: item.packageId,
+    name: item.name,
+    version: item.version,
+    runtime: item.runtime,
+    entrypoint: item.entrypoint,
+    checksum: item.checksum,
+    sizeBytes: Buffer.byteLength(item.content, "utf8"),
+    createdAt: item.createdAt
+  };
 }
 
 export function claimTask(nodeId: string): SwarmTask | null {

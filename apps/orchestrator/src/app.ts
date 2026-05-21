@@ -20,7 +20,10 @@ import {
   getRecentVerdicts,
   getTaskSnapshot,
   getTelemetrySnapshot,
+  getWorkerPackage,
+  listWorkerPackages,
   requeueTask,
+  registerWorkerPackage,
   recordHeartbeat,
   submitResult,
   updateNodeControl
@@ -282,6 +285,67 @@ export function buildApp(options?: {
 
     const task = addTask({ kind, payload: payload ?? {}, quorum });
     return reply.status(201).send(task);
+  });
+
+  app.post<{
+    Body: {
+      name?: string;
+      version?: string;
+      runtime?: string;
+      entrypoint?: string;
+      content?: string;
+    };
+  }>("/packages", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const name = request.body.name?.trim();
+    const version = request.body.version?.trim();
+    const runtime = request.body.runtime?.trim();
+    const entrypoint = request.body.entrypoint?.trim();
+    const content = request.body.content ?? "";
+
+    if (!name || !version || !runtime || !entrypoint || typeof content !== "string") {
+      return reply.status(400).send({ error: "invalid_package_payload" });
+    }
+
+    if (name.length > 120 || version.length > 60 || runtime.length > 40 || entrypoint.length > 240) {
+      return reply.status(400).send({ error: "invalid_package_payload" });
+    }
+
+    if (content.length < 1 || content.length > 1_000_000) {
+      return reply.status(400).send({ error: "invalid_package_content" });
+    }
+
+    const registered = registerWorkerPackage({ name, version, runtime, entrypoint, content });
+    return reply.status(201).send(registered);
+  });
+
+  app.get<{ Querystring: { limit?: string } }>("/packages", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const parsedLimit = request.query.limit ? Number(request.query.limit) : 50;
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      return reply.status(400).send({ error: "invalid_limit" });
+    }
+
+    return reply.status(200).send({ items: listWorkerPackages(parsedLimit) });
+  });
+
+  app.get<{ Params: { id: string } }>("/packages/:id", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const pkg = getWorkerPackage(request.params.id);
+    if (!pkg) {
+      return reply.status(404).send({ error: "package_not_found" });
+    }
+
+    return reply.status(200).send(pkg);
   });
 
   app.post<{

@@ -1462,6 +1462,67 @@ test("admin dashboard ui endpoint serves html shell", async (t) => {
   assert.match(response.body, /bioSwarmLanguage/);
 });
 
+test("package registry API creates, lists and fetches packages", async (t) => {
+  const app = buildApp({ adminApiKey: "package-key" });
+  t.after(() => app.close());
+
+  const unauthorized = await app.inject({
+    method: "POST",
+    url: "/packages",
+    payload: {
+      name: "sim-kernel",
+      version: "1.0.0",
+      runtime: "node",
+      entrypoint: "index.js",
+      content: "export function run(input){ return { ok: true, input }; }"
+    }
+  });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/packages",
+    headers: { "x-admin-key": "package-key" },
+    payload: {
+      name: "sim-kernel",
+      version: "1.0.0",
+      runtime: "node",
+      entrypoint: "index.js",
+      content: "export function run(input){ return { ok: true, input }; }"
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  assert.equal(typeof created.json().packageId, "string");
+  assert.equal(typeof created.json().checksum, "string");
+  assert.ok(created.json().sizeBytes > 0);
+
+  const listed = await app.inject({
+    method: "GET",
+    url: "/packages?limit=10",
+    headers: { "x-admin-key": "package-key" }
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.ok(Array.isArray(listed.json().items));
+  assert.equal(listed.json().items.length, 1);
+  assert.equal(listed.json().items[0].packageId, created.json().packageId);
+
+  const fetched = await app.inject({
+    method: "GET",
+    url: `/packages/${created.json().packageId}`,
+    headers: { "x-admin-key": "package-key" }
+  });
+  assert.equal(fetched.statusCode, 200);
+  assert.equal(fetched.json().packageId, created.json().packageId);
+  assert.equal(typeof fetched.json().content, "string");
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/packages/missing",
+    headers: { "x-admin-key": "package-key" }
+  });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("research experiments API creates, lists and reads details", async (t) => {
   const app = buildApp({ adminApiKey: "research-key" });
   t.after(() => app.close());

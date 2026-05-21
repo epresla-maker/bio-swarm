@@ -162,6 +162,9 @@ The orchestrator performs:
 - `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, includes task/node summaries plus recent verdict and audit samples)
 - `GET /admin/dashboard` (requires header `x-admin-key: <ADMIN_API_KEY>`, highlights attention tasks and nodes for operators with reason-specific metrics)
 - `GET /admin/dashboard/ui` (browser UI shell for operators; enter admin key in page to fetch `/admin/dashboard`)
+- `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum)
+- `GET /packages?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists registered worker packages)
+- `GET /packages/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns package metadata + content)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 

@@ -8,12 +8,15 @@ import {
   claimTask,
   configureAuditLogPersistence,
   configureStoreRuntime,
+  getWorkerPackage,
   getAuditLog,
   getAuditPersistenceStatus,
   getRecentVerdicts,
   getNodeStats,
   getTelemetrySnapshot,
+  listWorkerPackages,
   recordHeartbeat,
+  registerWorkerPackage,
   submitResult,
   resetStoreForTests
 } from "./store.js";
@@ -291,4 +294,40 @@ test("audit persistence status reports runtime configuration", () => {
   assert.equal(status.lastError, null);
 
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("worker package registry stores and updates by name/version", () => {
+  resetStoreForTests();
+
+  const first = registerWorkerPackage({
+    name: "sim-kernel",
+    version: "1.0.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    content: "export const version = '1.0.0';"
+  });
+
+  assert.equal(first.name, "sim-kernel");
+  assert.equal(first.version, "1.0.0");
+  assert.ok(first.sizeBytes > 0);
+
+  const listed = listWorkerPackages(10);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].packageId, first.packageId);
+
+  const fetched = getWorkerPackage(first.packageId);
+  assert.equal(fetched?.packageId, first.packageId);
+  assert.equal(typeof fetched?.content, "string");
+
+  const updated = registerWorkerPackage({
+    name: "sim-kernel",
+    version: "1.0.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    content: "export const version = '1.0.0'; export const patch = 1;"
+  });
+
+  assert.equal(updated.packageId, first.packageId);
+  assert.notEqual(updated.checksum, first.checksum);
+  assert.equal(listWorkerPackages(10).length, 1);
 });
