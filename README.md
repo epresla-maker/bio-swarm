@@ -38,6 +38,7 @@ Phones execute only lightweight work units such as:
 - biomedical data preprocessing
 
 Desktop GPU nodes handle heavier task-level inference units such as `llm_inference`.
+Workers can also run centrally managed package tasks via `package_execute`.
 
 Execution is allowed when policy permits:
 
@@ -189,6 +190,7 @@ Orchestrator:
 Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)
 - `NODE_ID` (default random `node-xxxxxxxx`)
+- `EDGE_ADMIN_API_KEY` (optional, used by worker to download registered packages from `/packages/:id`)
 - `EDGE_PROFILE` (`mobile` default, `desktop-gpu` enables desktop GPU capability mode)
 - `EDGE_GPU_VENDOR` (used when `EDGE_PROFILE=desktop-gpu`)
 - `EDGE_GPU_MODEL` (used when `EDGE_PROFILE=desktop-gpu`)

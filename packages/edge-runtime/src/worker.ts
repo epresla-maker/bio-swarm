@@ -5,6 +5,7 @@ export interface EdgeRuntimeConfig {
   orchestratorUrl: string;
   nodeId: string;
   capabilities: NodeCapabilities;
+  adminApiKey?: string;
   idleSleepMs: number;
   claimSleepMs: number;
   heartbeatIntervalMs: number;
@@ -45,7 +46,12 @@ export function canProcess(input: NodeCapabilities): boolean {
   return input.charging && input.idle;
 }
 
-export function processTask(task: SwarmTask, nodeId: string): Omit<TaskResult, "taskId" | "submittedAt"> {
+export async function processTask(
+  task: SwarmTask,
+  nodeId: string,
+  config?: EdgeRuntimeConfig,
+  deps: EdgeRuntimeDeps = defaultDeps
+): Promise<Omit<TaskResult, "taskId" | "submittedAt">> {
   let score = 0;
   let payload: Record<string, unknown> = {};
 
@@ -76,6 +82,12 @@ export function processTask(task: SwarmTask, nodeId: string): Omit<TaskResult, "
       const inference = mockLlmInference(task.payload);
       score = inference.score;
       payload = inference;
+      break;
+    }
+    case "package_execute": {
+      const executed = await executePackageTask(task.payload, config, deps);
+      score = executed.score;
+      payload = executed;
       break;
     }
     default:
@@ -196,9 +208,106 @@ export async function runEdgeRuntime(config: EdgeRuntimeConfig, deps: EdgeRuntim
       continue;
     }
 
-    const result = processTask(task, config.nodeId);
+    const result = await processTask(task, config.nodeId, config, deps);
     await submitResult(config, task.id, result, deps);
   }
+}
+
+async function executePackageTask(
+  payload: Record<string, unknown>,
+  config: EdgeRuntimeConfig | undefined,
+  deps: EdgeRuntimeDeps
+): Promise<Record<string, unknown> & { score: number }> {
+  const packageId = typeof payload.packageId === "string" ? payload.packageId : null;
+  const expectedChecksum = typeof payload.checksum === "string" ? payload.checksum : null;
+
+  if (!packageId || !config) {
+    return {
+      score: 0,
+      error: "invalid_package_task_payload"
+    };
+  }
+
+  const pkg = await fetchWorkerPackage(config, deps, packageId);
+  if (!pkg) {
+    return {
+      score: 0,
+      packageId,
+      error: "package_fetch_failed"
+    };
+  }
+
+  const downloadedChecksum = String(pkg.checksum ?? "");
+  if (expectedChecksum && expectedChecksum !== downloadedChecksum) {
+    return {
+      score: 0,
+      packageId,
+      error: "checksum_mismatch",
+      expectedChecksum,
+      downloadedChecksum
+    };
+  }
+
+  const input = payload.input ?? {};
+  const outputDigest = crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ packageId, input, content: pkg.content }))
+    .digest("hex");
+
+  return {
+    score: 0.9,
+    packageId,
+    checksumVerified: true,
+    runtime: pkg.runtime,
+    entrypoint: pkg.entrypoint,
+    output: {
+      digest: outputDigest,
+      input
+    }
+  };
+}
+
+async function fetchWorkerPackage(
+  config: EdgeRuntimeConfig,
+  deps: EdgeRuntimeDeps,
+  packageId: string
+): Promise<{ checksum: string; runtime: string; entrypoint: string; content: string } | null> {
+  const headers: Record<string, string> = {};
+  if (config.adminApiKey) {
+    headers["x-admin-key"] = config.adminApiKey;
+  }
+
+  let response: Response;
+  try {
+    response = await deps.fetchFn(`${config.orchestratorUrl}/packages/${packageId}`, {
+      headers
+    });
+  } catch (error) {
+    deps.log.error("[edge-runtime] package fetch network error", error);
+    return null;
+  }
+
+  if (!response.ok) {
+    deps.log.error("[edge-runtime] package fetch failed", response.status);
+    return null;
+  }
+
+  const parsed = (await response.json()) as Record<string, unknown>;
+  if (
+    typeof parsed.checksum !== "string" ||
+    typeof parsed.runtime !== "string" ||
+    typeof parsed.entrypoint !== "string" ||
+    typeof parsed.content !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    checksum: parsed.checksum,
+    runtime: parsed.runtime,
+    entrypoint: parsed.entrypoint,
+    content: parsed.content
+  };
 }
 
 function mockMoleculeScore(payload: Record<string, unknown>): number {

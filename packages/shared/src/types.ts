@@ -4,7 +4,8 @@ export type TaskKind =
   | "bio_prescreen"
   | "hypothesis_rank"
   | "bio_simulation"
-  | "llm_inference";
+  | "llm_inference"
+  | "package_execute";
 
 export interface NodeGpuInfo {
   vendor: string;

@@ -26,6 +26,7 @@ const config = {
   orchestratorUrl: process.env.ORCHESTRATOR_URL ?? "http://localhost:4000",
   nodeId: process.env.NODE_ID ?? `node-${crypto.randomUUID().slice(0, 8)}`,
   capabilities: resolveCapabilities(),
+  adminApiKey: process.env.EDGE_ADMIN_API_KEY,
   idleSleepMs: 5000,
   claimSleepMs: 1500,
   heartbeatIntervalMs: 10_000

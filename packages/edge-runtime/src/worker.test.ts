@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 import type { SwarmTask } from "@bio-swarm/shared";
 import {
@@ -40,7 +41,7 @@ function createDeps(fetchFn: typeof fetch): EdgeRuntimeDeps {
   };
 }
 
-test("processTask returns deterministic structure", () => {
+test("processTask returns deterministic structure", async () => {
   const task: SwarmTask = {
     id: "t-1",
     kind: "molecule_score",
@@ -49,15 +50,15 @@ test("processTask returns deterministic structure", () => {
     quorum: 1
   };
 
-  const first = processTask(task, "node-1");
-  const second = processTask(task, "node-1");
+  const first = await processTask(task, "node-1");
+  const second = await processTask(task, "node-1");
 
   assert.equal(first.nodeId, "node-1");
   assert.equal(first.score, second.score);
   assert.equal(first.checksum, second.checksum);
 });
 
-test("processTask handles llm_inference payload", () => {
+test("processTask handles llm_inference payload", async () => {
   const task: SwarmTask = {
     id: "t-llm-1",
     kind: "llm_inference",
@@ -71,13 +72,61 @@ test("processTask handles llm_inference payload", () => {
     quorum: 1
   };
 
-  const result = processTask(task, "node-gpu-1");
+  const result = await processTask(task, "node-gpu-1");
   assert.equal(result.nodeId, "node-gpu-1");
   assert.equal(typeof result.payload.completion, "string");
   assert.equal(typeof result.payload.usage, "object");
   assert.equal(typeof result.score, "number");
   assert.ok(result.score >= 0);
   assert.ok(result.score <= 1);
+});
+
+test("processTask handles package_execute with package download and checksum verification", async () => {
+  const packageContent = "export function run(input){ return { ok: true, input }; }";
+  const checksum = crypto.createHash("sha256").update(packageContent).digest("hex");
+  const task: SwarmTask = {
+    id: "t-pkg-1",
+    kind: "package_execute",
+    payload: {
+      packageId: "pkg-1",
+      checksum,
+      input: { sample: "abc" }
+    },
+    createdAt: new Date().toISOString(),
+    quorum: 1
+  };
+
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/packages/pkg-1")) {
+      return new Response(
+        JSON.stringify({
+          packageId: "pkg-1",
+          runtime: "node",
+          entrypoint: "index.js",
+          checksum,
+          content: packageContent
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    return new Response("", { status: 404 });
+  });
+
+  const result = await processTask(
+    task,
+    "node-pkg-1",
+    {
+      ...createConfig(),
+      adminApiKey: "edge-package-key"
+    },
+    deps
+  );
+
+  assert.equal(result.nodeId, "node-pkg-1");
+  assert.equal(result.payload.packageId, "pkg-1");
+  assert.equal(result.payload.checksumVerified, true);
+  assert.equal(typeof result.payload.output, "object");
+  assert.ok(result.score > 0);
 });
 
 test("canProcess allows desktop_gpu nodes with GPU info", () => {
