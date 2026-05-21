@@ -166,6 +166,10 @@ The orchestrator performs:
 - `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum)
 - `GET /packages?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists registered worker packages)
 - `GET /packages/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns package metadata + content)
+- `POST /workers/register` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers worker agent metadata)
+- `POST /workers/:id/heartbeat` (requires header `x-admin-key: <ADMIN_API_KEY>`, updates worker runtime status)
+- `GET /workers?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists worker agents)
+- `GET /workers/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns worker snapshot)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 
@@ -191,6 +195,7 @@ Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)
 - `NODE_ID` (default random `node-xxxxxxxx`)
 - `EDGE_ADMIN_API_KEY` (optional, used by worker to download registered packages from `/packages/:id`)
+- `EDGE_AGENT_VERSION` (optional, worker version string sent during `/workers/register`)
 - `EDGE_PROFILE` (`mobile` default, `desktop-gpu` enables desktop GPU capability mode)
 - `EDGE_GPU_VENDOR` (used when `EDGE_PROFILE=desktop-gpu`)
 - `EDGE_GPU_MODEL` (used when `EDGE_PROFILE=desktop-gpu`)

@@ -8,14 +8,18 @@ import {
   claimTask,
   configureAuditLogPersistence,
   configureStoreRuntime,
+  getWorker,
   getWorkerPackage,
   getAuditLog,
   getAuditPersistenceStatus,
   getRecentVerdicts,
   getNodeStats,
+  heartbeatWorker,
   getTelemetrySnapshot,
   listWorkerPackages,
+  listWorkers,
   recordHeartbeat,
+  registerWorker,
   registerWorkerPackage,
   submitResult,
   resetStoreForTests
@@ -330,4 +334,42 @@ test("worker package registry stores and updates by name/version", () => {
   assert.equal(updated.packageId, first.packageId);
   assert.notEqual(updated.checksum, first.checksum);
   assert.equal(listWorkerPackages(10).length, 1);
+});
+
+test("worker registry tracks registration and heartbeat updates", () => {
+  resetStoreForTests();
+
+  const registered = registerWorker({
+    workerId: "worker-a",
+    nodeId: "node-a",
+    agentVersion: "worker/0.1.0",
+    platform: "darwin-arm64",
+    status: "running",
+    packageCount: 1
+  });
+
+  assert.equal(registered.workerId, "worker-a");
+  assert.equal(registered.nodeId, "node-a");
+  assert.equal(registered.status, "running");
+
+  const listed = listWorkers(10);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].workerId, "worker-a");
+
+  const heartbeat = heartbeatWorker("worker-a", {
+    status: "idle",
+    packageCount: 2,
+    lastPackageId: "pkg-1",
+    lastPackageChecksum: "abc123"
+  });
+  assert.equal(heartbeat?.status, "idle");
+  assert.equal(heartbeat?.packageCount, 2);
+  assert.equal(heartbeat?.lastPackageId, "pkg-1");
+
+  const fetched = getWorker("worker-a");
+  assert.equal(fetched?.workerId, "worker-a");
+  assert.equal(fetched?.status, "idle");
+
+  const missingHeartbeat = heartbeatWorker("worker-missing", { status: "idle" });
+  assert.equal(missingHeartbeat, null);
 });

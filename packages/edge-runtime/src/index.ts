@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import os from "node:os";
 import { defaultCapabilities, runEdgeRuntime } from "./worker.js";
 
 function resolveCapabilities() {
@@ -27,6 +28,8 @@ const config = {
   nodeId: process.env.NODE_ID ?? `node-${crypto.randomUUID().slice(0, 8)}`,
   capabilities: resolveCapabilities(),
   adminApiKey: process.env.EDGE_ADMIN_API_KEY,
+  agentVersion: process.env.EDGE_AGENT_VERSION ?? "edge-runtime/0.1.0",
+  platform: `${os.platform()}-${os.arch()}`,
   idleSleepMs: 5000,
   claimSleepMs: 1500,
   heartbeatIntervalMs: 10_000

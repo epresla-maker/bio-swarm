@@ -1523,6 +1523,78 @@ test("package registry API creates, lists and fetches packages", async (t) => {
   assert.equal(missing.statusCode, 404);
 });
 
+test("worker registry API registers, heartbeats, lists and fetches workers", async (t) => {
+  const app = buildApp({ adminApiKey: "worker-key" });
+  t.after(() => app.close());
+
+  const unauthorized = await app.inject({
+    method: "POST",
+    url: "/workers/register",
+    payload: {
+      workerId: "worker-1",
+      agentVersion: "worker/0.1.0",
+      platform: "darwin-arm64"
+    }
+  });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const registered = await app.inject({
+    method: "POST",
+    url: "/workers/register",
+    headers: { "x-admin-key": "worker-key" },
+    payload: {
+      workerId: "worker-1",
+      nodeId: "node-1",
+      agentVersion: "worker/0.1.0",
+      platform: "darwin-arm64",
+      status: "running",
+      packageCount: 1
+    }
+  });
+  assert.equal(registered.statusCode, 201);
+  assert.equal(registered.json().workerId, "worker-1");
+
+  const heartbeat = await app.inject({
+    method: "POST",
+    url: "/workers/worker-1/heartbeat",
+    headers: { "x-admin-key": "worker-key" },
+    payload: {
+      status: "idle",
+      packageCount: 2,
+      lastPackageId: "pkg-1",
+      lastPackageChecksum: "abc123"
+    }
+  });
+  assert.equal(heartbeat.statusCode, 200);
+  assert.equal(heartbeat.json().status, "idle");
+  assert.equal(heartbeat.json().packageCount, 2);
+
+  const listed = await app.inject({
+    method: "GET",
+    url: "/workers?limit=10",
+    headers: { "x-admin-key": "worker-key" }
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().items.length, 1);
+  assert.equal(listed.json().items[0].workerId, "worker-1");
+
+  const fetched = await app.inject({
+    method: "GET",
+    url: "/workers/worker-1",
+    headers: { "x-admin-key": "worker-key" }
+  });
+  assert.equal(fetched.statusCode, 200);
+  assert.equal(fetched.json().workerId, "worker-1");
+  assert.equal(fetched.json().status, "idle");
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/workers/missing",
+    headers: { "x-admin-key": "worker-key" }
+  });
+  assert.equal(missing.statusCode, 404);
+});
+
 test("research experiments API creates, lists and reads details", async (t) => {
   const app = buildApp({ adminApiKey: "research-key" });
   t.after(() => app.close());

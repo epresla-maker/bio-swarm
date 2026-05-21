@@ -6,6 +6,8 @@ export interface EdgeRuntimeConfig {
   nodeId: string;
   capabilities: NodeCapabilities;
   adminApiKey?: string;
+  agentVersion?: string;
+  platform?: string;
   idleSleepMs: number;
   claimSleepMs: number;
   heartbeatIntervalMs: number;
@@ -152,6 +154,68 @@ export async function sendHeartbeat(config: EdgeRuntimeConfig, deps: EdgeRuntime
   return true;
 }
 
+export async function registerWorker(config: EdgeRuntimeConfig, deps: EdgeRuntimeDeps): Promise<boolean> {
+  if (!config.adminApiKey) {
+    return false;
+  }
+
+  let response: Response;
+  try {
+    response = await deps.fetchFn(`${config.orchestratorUrl}/workers/register`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-key": config.adminApiKey
+      },
+      body: JSON.stringify({
+        workerId: config.nodeId,
+        nodeId: config.nodeId,
+        agentVersion: config.agentVersion ?? "edge-runtime/0.1.0",
+        platform: config.platform ?? "unknown",
+        status: "running"
+      })
+    });
+  } catch (error) {
+    deps.log.error("[edge-runtime] worker register network error", error);
+    return false;
+  }
+
+  if (!response.ok) {
+    deps.log.error("[edge-runtime] worker register failed", response.status);
+    return false;
+  }
+
+  return true;
+}
+
+export async function sendWorkerHeartbeat(config: EdgeRuntimeConfig, deps: EdgeRuntimeDeps): Promise<boolean> {
+  if (!config.adminApiKey) {
+    return false;
+  }
+
+  let response: Response;
+  try {
+    response = await deps.fetchFn(`${config.orchestratorUrl}/workers/${config.nodeId}/heartbeat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-key": config.adminApiKey
+      },
+      body: JSON.stringify({ status: "running" })
+    });
+  } catch (error) {
+    deps.log.error("[edge-runtime] worker heartbeat network error", error);
+    return false;
+  }
+
+  if (!response.ok) {
+    deps.log.error("[edge-runtime] worker heartbeat failed", response.status);
+    return false;
+  }
+
+  return true;
+}
+
 export async function submitResult(
   config: EdgeRuntimeConfig,
   taskId: string,
@@ -182,9 +246,11 @@ export async function submitResult(
 
 export function startHeartbeatLoop(config: EdgeRuntimeConfig, deps: EdgeRuntimeDeps): () => void {
   void sendHeartbeat(config, deps);
+  void sendWorkerHeartbeat(config, deps);
 
   const interval = deps.setIntervalFn(() => {
     void sendHeartbeat(config, deps);
+    void sendWorkerHeartbeat(config, deps);
   }, config.heartbeatIntervalMs);
 
   return () => {
@@ -194,6 +260,7 @@ export function startHeartbeatLoop(config: EdgeRuntimeConfig, deps: EdgeRuntimeD
 
 export async function runEdgeRuntime(config: EdgeRuntimeConfig, deps: EdgeRuntimeDeps = defaultDeps): Promise<void> {
   deps.log.log(`[edge-runtime] started as ${config.nodeId}`);
+  void registerWorker(config, deps);
   startHeartbeatLoop(config, deps);
 
   while (true) {

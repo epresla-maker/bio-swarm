@@ -6,7 +6,9 @@ import {
   canProcess,
   claimTask,
   processTask,
+  registerWorker,
   sendHeartbeat,
+  sendWorkerHeartbeat,
   submitResult,
   type EdgeRuntimeConfig,
   type EdgeRuntimeDeps
@@ -171,6 +173,33 @@ test("sendHeartbeat returns false for non-ok response", async () => {
   const deps = createDeps(async () => new Response("", { status: 500 }));
   const sent = await sendHeartbeat(createConfig(), deps);
   assert.equal(sent, false);
+});
+
+test("registerWorker and sendWorkerHeartbeat return true for ok responses", async () => {
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/workers/register")) {
+      return new Response("{}", { status: 201, headers: { "content-type": "application/json" } });
+    }
+
+    if (String(url).includes("/workers/")) {
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }
+
+    return new Response("", { status: 404 });
+  });
+
+  const config = {
+    ...createConfig(),
+    adminApiKey: "worker-key",
+    agentVersion: "edge-runtime/0.1.0",
+    platform: "darwin-arm64"
+  };
+
+  const registered = await registerWorker(config, deps);
+  assert.equal(registered, true);
+
+  const heartbeat = await sendWorkerHeartbeat(config, deps);
+  assert.equal(heartbeat, true);
 });
 
 test("submitResult returns false on network error", async () => {

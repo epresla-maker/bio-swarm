@@ -196,10 +196,39 @@ export interface AdminDashboardSnapshot {
   auditPersistence: AuditPersistenceStatus;
 }
 
+interface WorkerRecord {
+  workerId: string;
+  nodeId: string | null;
+  agentVersion: string;
+  platform: string;
+  packageCount: number;
+  lastPackageId: string | null;
+  lastPackageChecksum: string | null;
+  status: string;
+  lastResultAt: string | null;
+  registeredAt: string;
+  lastSeenAt: string;
+}
+
+export interface WorkerSnapshot {
+  workerId: string;
+  nodeId: string | null;
+  agentVersion: string;
+  platform: string;
+  packageCount: number;
+  lastPackageId: string | null;
+  lastPackageChecksum: string | null;
+  status: string;
+  lastResultAt: string | null;
+  registeredAt: string;
+  lastSeenAt: string;
+}
+
 const tasks = new Map<string, TaskRecord>();
 const nodeStats = new Map<string, NodeStats>();
 const nodeCapabilities = new Map<string, NodeCapabilities>();
 const nodeControlStates = new Map<string, NodeControlState>();
+const workers = new Map<string, WorkerRecord>();
 const workerPackages = new Map<string, WorkerPackageRecord>();
 
 let leaseTtlMs = Number(process.env.LEASE_TTL_MS ?? 30_000);
@@ -263,6 +292,7 @@ export function resetStoreForTests(): void {
   nodeStats.clear();
   nodeCapabilities.clear();
   nodeControlStates.clear();
+  workers.clear();
   workerPackages.clear();
   retryCount = 0;
   expiredLeaseCount = 0;
@@ -1027,6 +1057,112 @@ export function getNodeSnapshot(nodeId: string): NodeSnapshot | null {
     capabilities: nodeCapabilities.get(nodeId) ?? null,
     active: isNodeActive(stats),
     control: getNodeControlState(nodeId)
+  };
+}
+
+export function registerWorker(input: {
+  workerId: string;
+  nodeId?: string;
+  agentVersion: string;
+  platform: string;
+  packageCount?: number;
+  lastPackageId?: string;
+  lastPackageChecksum?: string;
+  status?: string;
+  lastResultAt?: string;
+}): WorkerSnapshot {
+  const nowIso = new Date(nowProvider()).toISOString();
+  const existing = workers.get(input.workerId);
+  const registeredAt = existing?.registeredAt ?? nowIso;
+
+  const record: WorkerRecord = {
+    workerId: input.workerId,
+    nodeId: typeof input.nodeId === "string" && input.nodeId.trim().length > 0 ? input.nodeId.trim() : null,
+    agentVersion: input.agentVersion,
+    platform: input.platform,
+    packageCount: typeof input.packageCount === "number" && Number.isFinite(input.packageCount) ? Math.max(0, Math.floor(input.packageCount)) : 0,
+    lastPackageId:
+      typeof input.lastPackageId === "string" && input.lastPackageId.trim().length > 0 ? input.lastPackageId.trim() : null,
+    lastPackageChecksum:
+      typeof input.lastPackageChecksum === "string" && input.lastPackageChecksum.trim().length > 0
+        ? input.lastPackageChecksum.trim()
+        : null,
+    status: typeof input.status === "string" && input.status.trim().length > 0 ? input.status.trim() : "idle",
+    lastResultAt:
+      typeof input.lastResultAt === "string" && input.lastResultAt.trim().length > 0 ? input.lastResultAt.trim() : null,
+    registeredAt,
+    lastSeenAt: nowIso
+  };
+
+  workers.set(input.workerId, record);
+  return toWorkerSnapshot(record);
+}
+
+export function heartbeatWorker(
+  workerId: string,
+  input: {
+    packageCount?: number;
+    lastPackageId?: string;
+    lastPackageChecksum?: string;
+    status?: string;
+    lastResultAt?: string;
+  }
+): WorkerSnapshot | null {
+  const existing = workers.get(workerId);
+  if (!existing) {
+    return null;
+  }
+
+  if (typeof input.packageCount === "number" && Number.isFinite(input.packageCount)) {
+    existing.packageCount = Math.max(0, Math.floor(input.packageCount));
+  }
+
+  if (typeof input.lastPackageId === "string") {
+    existing.lastPackageId = input.lastPackageId.trim().length > 0 ? input.lastPackageId.trim() : null;
+  }
+
+  if (typeof input.lastPackageChecksum === "string") {
+    existing.lastPackageChecksum = input.lastPackageChecksum.trim().length > 0 ? input.lastPackageChecksum.trim() : null;
+  }
+
+  if (typeof input.status === "string" && input.status.trim().length > 0) {
+    existing.status = input.status.trim();
+  }
+
+  if (typeof input.lastResultAt === "string" && input.lastResultAt.trim().length > 0) {
+    existing.lastResultAt = input.lastResultAt.trim();
+  }
+
+  existing.lastSeenAt = new Date(nowProvider()).toISOString();
+  return toWorkerSnapshot(existing);
+}
+
+export function listWorkers(limit: number): WorkerSnapshot[] {
+  const bounded = Math.max(1, Math.min(200, Math.floor(limit)));
+  return Array.from(workers.values())
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+    .slice(0, bounded)
+    .map((item) => toWorkerSnapshot(item));
+}
+
+export function getWorker(workerId: string): WorkerSnapshot | null {
+  const found = workers.get(workerId);
+  return found ? toWorkerSnapshot(found) : null;
+}
+
+function toWorkerSnapshot(item: WorkerRecord): WorkerSnapshot {
+  return {
+    workerId: item.workerId,
+    nodeId: item.nodeId,
+    agentVersion: item.agentVersion,
+    platform: item.platform,
+    packageCount: item.packageCount,
+    lastPackageId: item.lastPackageId,
+    lastPackageChecksum: item.lastPackageChecksum,
+    status: item.status,
+    lastResultAt: item.lastResultAt,
+    registeredAt: item.registeredAt,
+    lastSeenAt: item.lastSeenAt
   };
 }
 

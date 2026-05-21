@@ -6,6 +6,7 @@ import {
   cancelTask,
   claimTask,
   deleteTask,
+  getWorker,
   getAuditLog,
   getAdminDashboardSnapshot,
   getAuditPersistenceStatus,
@@ -20,8 +21,11 @@ import {
   getRecentVerdicts,
   getTaskSnapshot,
   getTelemetrySnapshot,
+  heartbeatWorker,
+  listWorkers,
   getWorkerPackage,
   listWorkerPackages,
+  registerWorker,
   requeueTask,
   registerWorkerPackage,
   recordHeartbeat,
@@ -285,6 +289,101 @@ export function buildApp(options?: {
 
     const task = addTask({ kind, payload: payload ?? {}, quorum });
     return reply.status(201).send(task);
+  });
+
+  app.post<{
+    Body: {
+      workerId?: string;
+      nodeId?: string;
+      agentVersion?: string;
+      platform?: string;
+      packageCount?: number;
+      lastPackageId?: string;
+      lastPackageChecksum?: string;
+      status?: string;
+      lastResultAt?: string;
+    };
+  }>("/workers/register", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const workerId = request.body.workerId?.trim();
+    const agentVersion = request.body.agentVersion?.trim();
+    const platform = request.body.platform?.trim();
+
+    if (!workerId || !agentVersion || !platform) {
+      return reply.status(400).send({ error: "invalid_worker_payload" });
+    }
+
+    const worker = registerWorker({
+      workerId,
+      nodeId: request.body.nodeId,
+      agentVersion,
+      platform,
+      packageCount: request.body.packageCount,
+      lastPackageId: request.body.lastPackageId,
+      lastPackageChecksum: request.body.lastPackageChecksum,
+      status: request.body.status,
+      lastResultAt: request.body.lastResultAt
+    });
+
+    return reply.status(201).send(worker);
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: {
+      packageCount?: number;
+      lastPackageId?: string;
+      lastPackageChecksum?: string;
+      status?: string;
+      lastResultAt?: string;
+    };
+  }>("/workers/:id/heartbeat", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const worker = heartbeatWorker(request.params.id, {
+      packageCount: request.body.packageCount,
+      lastPackageId: request.body.lastPackageId,
+      lastPackageChecksum: request.body.lastPackageChecksum,
+      status: request.body.status,
+      lastResultAt: request.body.lastResultAt
+    });
+
+    if (!worker) {
+      return reply.status(404).send({ error: "worker_not_found" });
+    }
+
+    return reply.status(200).send(worker);
+  });
+
+  app.get<{ Querystring: { limit?: string } }>("/workers", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const parsedLimit = request.query.limit ? Number(request.query.limit) : 50;
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      return reply.status(400).send({ error: "invalid_limit" });
+    }
+
+    return reply.status(200).send({ items: listWorkers(parsedLimit) });
+  });
+
+  app.get<{ Params: { id: string } }>("/workers/:id", async (request, reply) => {
+    if (!enforceAdminAccess(request, reply)) {
+      return;
+    }
+
+    const worker = getWorker(request.params.id);
+    if (!worker) {
+      return reply.status(404).send({ error: "worker_not_found" });
+    }
+
+    return reply.status(200).send(worker);
   });
 
   app.post<{
