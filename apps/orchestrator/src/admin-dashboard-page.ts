@@ -282,6 +282,19 @@ export function renderAdminDashboardPage(): string {
 					<div id="nodeSummary"></div>
 				</article>
 
+				<article class="card kpi">
+					<h2 id="workerSummaryTitle">Worker Osszegzes</h2>
+					<div id="workerSummary"></div>
+				</article>
+
+				<article class="card kpi">
+					<h2 id="recentWorkersTitle">Friss Workerek</h2>
+					<div class="form-row">
+						<label id="workerErrorsOnlyLabel" class="toggle"><input id="workerErrorsOnly" type="checkbox" /> Csak hibas</label>
+					</div>
+					<div id="recentWorkers"></div>
+				</article>
+
 				<article class="card wide">
 					<h3 id="gpuNodesTitle">Desktop GPU Node-ok</h3>
 					<div class="form-row">
@@ -365,6 +378,9 @@ export function renderAdminDashboardPage(): string {
 					refresh: 'Frissites',
 					taskSummaryTitle: 'Feladat Osszegzes',
 					nodeSummaryTitle: 'Node Osszegzes',
+					workerSummaryTitle: 'Worker Osszegzes',
+					recentWorkersTitle: 'Friss Workerek',
+					workerErrorsOnly: 'Csak hibas',
 					attentionTasksTitle: 'Figyelmet Igenylo Feladatok',
 					attentionNodesTitle: 'Figyelmet Igenylo Node-ok',
 					recentAuditTitle: 'Legutobbi Audit Esemenyek',
@@ -391,6 +407,9 @@ export function renderAdminDashboardPage(): string {
 					completed: 'Befejezett',
 					failed: 'Sikertelen',
 					active: 'Aktiv',
+					running: 'Futo',
+					idle: 'Tetlen',
+					withErrors: 'Hibas',
 					enabled: 'Engedelyezett',
 					disabled: 'Tiltott',
 					quarantine: 'Karanten',
@@ -399,6 +418,8 @@ export function renderAdminDashboardPage(): string {
 					noAttentionNodes: 'Nincs figyelmet igenylo node.',
 					noAudit: 'Nincs audit esemeny.',
 					noExperiments: 'Meg nincs kiserlet.',
+					noWorkers: 'Nincs worker telemetria.',
+					noErrorWorkers: 'Nincs hibas worker az aktualis mintaban.',
 					noGpuNodes: 'Nincs aktiv desktop GPU node.',
 					gpuVram: 'VRAM',
 					open: 'Megnyitas',
@@ -434,6 +455,9 @@ export function renderAdminDashboardPage(): string {
 					refresh: 'Refresh',
 					taskSummaryTitle: 'Task Summary',
 					nodeSummaryTitle: 'Node Summary',
+					workerSummaryTitle: 'Worker Summary',
+					recentWorkersTitle: 'Recent Workers',
+					workerErrorsOnly: 'Errors only',
 					attentionTasksTitle: 'Attention Tasks',
 					attentionNodesTitle: 'Attention Nodes',
 					recentAuditTitle: 'Recent Audit Events',
@@ -460,6 +484,9 @@ export function renderAdminDashboardPage(): string {
 					completed: 'Completed',
 					failed: 'Failed',
 					active: 'Active',
+					running: 'Running',
+					idle: 'Idle',
+					withErrors: 'With Errors',
 					enabled: 'Enabled',
 					disabled: 'Disabled',
 					quarantine: 'Quarantined',
@@ -468,6 +495,8 @@ export function renderAdminDashboardPage(): string {
 					noAttentionNodes: 'No attention nodes.',
 					noAudit: 'No audit events.',
 					noExperiments: 'No experiments yet.',
+					noWorkers: 'No worker telemetry available.',
+					noErrorWorkers: 'No error workers in the current sample.',
 					noGpuNodes: 'No desktop GPU nodes found.',
 					gpuVram: 'VRAM',
 					open: 'Open',
@@ -514,6 +543,10 @@ export function renderAdminDashboardPage(): string {
 				status: document.getElementById("status"),
 				taskSummaryTitle: document.getElementById('taskSummaryTitle'),
 				nodeSummaryTitle: document.getElementById('nodeSummaryTitle'),
+				workerSummaryTitle: document.getElementById('workerSummaryTitle'),
+				recentWorkersTitle: document.getElementById('recentWorkersTitle'),
+				workerErrorsOnlyLabel: document.getElementById('workerErrorsOnlyLabel'),
+				workerErrorsOnly: document.getElementById('workerErrorsOnly'),
 				attentionTasksTitle: document.getElementById('attentionTasksTitle'),
 				attentionNodesTitle: document.getElementById('attentionNodesTitle'),
 				gpuNodesTitle: document.getElementById('gpuNodesTitle'),
@@ -528,6 +561,8 @@ export function renderAdminDashboardPage(): string {
 				compareTitle: document.getElementById('compareTitle'),
 				taskSummary: document.getElementById("taskSummary"),
 				nodeSummary: document.getElementById("nodeSummary"),
+				workerSummary: document.getElementById("workerSummary"),
+				recentWorkers: document.getElementById("recentWorkers"),
 				attentionTasks: document.getElementById("attentionTasks"),
 				attentionNodes: document.getElementById("attentionNodes"),
 				gpuNodes: document.getElementById("gpuNodes"),
@@ -561,6 +596,9 @@ export function renderAdminDashboardPage(): string {
 				els.refresh.textContent = t('refresh');
 				els.taskSummaryTitle.textContent = t('taskSummaryTitle');
 				els.nodeSummaryTitle.textContent = t('nodeSummaryTitle');
+				els.workerSummaryTitle.textContent = t('workerSummaryTitle');
+				els.recentWorkersTitle.textContent = t('recentWorkersTitle');
+				els.workerErrorsOnlyLabel.lastChild.textContent = ' ' + t('workerErrorsOnly');
 				els.attentionTasksTitle.textContent = t('attentionTasksTitle');
 				els.attentionNodesTitle.textContent = t('attentionNodesTitle');
 				els.gpuNodesTitle.textContent = t('gpuNodesTitle');
@@ -585,6 +623,9 @@ export function renderAdminDashboardPage(): string {
 				if (!researchItems.length) {
 					els.researchTrend.innerHTML = t('researchTrendEmpty');
 				}
+				if (recentWorkerRawItems.length || els.workerErrorsOnly.checked) {
+					applyWorkerFilters();
+				}
 				if (gpuNodeItems.length) {
 					renderGpuNodes(gpuNodeItems);
 				} else {
@@ -600,6 +641,8 @@ export function renderAdminDashboardPage(): string {
 			let researchItems = [];
 			let gpuRawItems = [];
 			let gpuNodeItems = [];
+			let recentWorkerRawItems = [];
+			let recentWorkerItems = [];
 			let compareAId = null;
 			let compareBId = null;
 			let compareSnapshot = null;
@@ -633,6 +676,20 @@ export function renderAdminDashboardPage(): string {
 					row(t('disabled'), data.nodes.disabled, data.nodes.disabled > 0 ? "warn" : "ok"),
 					row(t('quarantine'), data.nodes.quarantined, data.nodes.quarantined > 0 ? "warn" : "ok")
 				].join("");
+
+				const workers = data.workers || { total: 0, active: 0, running: 0, idle: 0, withErrors: 0 };
+				const recentWorkers = Array.isArray(data.recentWorkers) ? data.recentWorkers : [];
+
+				els.workerSummary.innerHTML = [
+					row(t('total'), workers.total),
+					row(t('active'), workers.active),
+					row(t('running'), workers.running, workers.running > 0 ? "ok" : ""),
+					row(t('idle'), workers.idle),
+					row(t('withErrors'), workers.withErrors, workers.withErrors > 0 ? "warn" : "ok")
+				].join("");
+
+				recentWorkerRawItems = recentWorkers;
+				applyWorkerFilters();
 
 				els.attentionTasks.innerHTML = data.attentionTasks.length
 					? data.attentionTasks
@@ -703,6 +760,39 @@ export function renderAdminDashboardPage(): string {
 						);
 					})
 					.join('');
+			}
+
+			function renderRecentWorkers(items) {
+				if (!items.length) {
+					const message = els.workerErrorsOnly.checked ? t('noErrorWorkers') : t('noWorkers');
+					els.recentWorkers.innerHTML = '<div class="mono">' + message + '</div>';
+					return;
+				}
+
+				els.recentWorkers.innerHTML = items
+					.map(
+						(item) =>
+							'<div class="row"><div><strong>' + item.workerId + '</strong><div class="mono">' +
+							(item.status || 'unknown') +
+							' | exec=' + (item.lastExecutionStatus || 'n/a') +
+							(item.lastExecutionError ? ' | err=' + item.lastExecutionError : '') +
+							(item.lastTaskId ? ' | task=' + item.lastTaskId : '') +
+							'</div></div></div>'
+					)
+					.join('');
+			}
+
+			function applyWorkerFilters() {
+				const errorsOnly = Boolean(els.workerErrorsOnly.checked);
+				recentWorkerItems = recentWorkerRawItems.filter((item) => {
+					if (!errorsOnly) {
+						return true;
+					}
+
+					return item.lastExecutionStatus === 'completed_with_error' || item.lastExecutionStatus === 'submit_failed';
+				});
+
+				renderRecentWorkers(recentWorkerItems);
 			}
 
 			function applyGpuFilters() {
@@ -1255,6 +1345,9 @@ export function renderAdminDashboardPage(): string {
 			});
 			els.gpuMinVram.addEventListener('input', () => {
 				applyGpuFilters();
+			});
+			els.workerErrorsOnly.addEventListener('change', () => {
+				applyWorkerFilters();
 			});
 			els.autoRefresh.addEventListener("change", syncAutoRefresh);
 			els.key.addEventListener("keydown", (event) => {

@@ -163,6 +163,7 @@ The orchestrator performs:
 - `GET /telemetry`
 - `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, includes task/node summaries plus recent verdict and audit samples)
+- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns task/node/worker summaries, recent worker snapshots, recent verdicts, recent audit items, and audit persistence status)
 - `GET /admin/dashboard` (requires header `x-admin-key: <ADMIN_API_KEY>`, highlights attention tasks and nodes for operators with reason-specific metrics)
 - `GET /admin/dashboard/ui` (browser UI shell for operators; enter admin key in page to fetch `/admin/dashboard`)
 - `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum)

@@ -1333,6 +1333,35 @@ test("admin status endpoint returns audit persistence status", async (t) => {
     payload: { nodeId: "status-node", checksum: "status-ok", score: 0.55, payload: {} }
   });
 
+  const workerRegistered = await app.inject({
+    method: "POST",
+    url: "/workers/register",
+    headers: { "x-admin-key": "status-key" },
+    payload: {
+      workerId: "status-worker",
+      nodeId: "status-node",
+      agentVersion: "edge-runtime/0.1.0",
+      platform: "darwin-arm64",
+      status: "running",
+      lastExecutionStatus: "completed"
+    }
+  });
+  assert.equal(workerRegistered.statusCode, 201);
+
+  const workerHeartbeat = await app.inject({
+    method: "POST",
+    url: "/workers/status-worker/heartbeat",
+    headers: { "x-admin-key": "status-key" },
+    payload: {
+      status: "running",
+      lastTaskId: "status-task-1",
+      lastTaskKind: "package_execute",
+      lastExecutionStatus: "completed_with_error",
+      lastExecutionError: "checksum_mismatch"
+    }
+  });
+  assert.equal(workerHeartbeat.statusCode, 200);
+
   const unauthorized = await app.inject({ method: "GET", url: "/admin/status" });
   assert.equal(unauthorized.statusCode, 401);
 
@@ -1349,6 +1378,13 @@ test("admin status endpoint returns audit persistence status", async (t) => {
   assert.equal(typeof authorized.json().nodes.enabled, "number");
   assert.equal(typeof authorized.json().nodes.disabled, "number");
   assert.equal(typeof authorized.json().nodes.quarantined, "number");
+  assert.equal(typeof authorized.json().workers.total, "number");
+  assert.equal(authorized.json().workers.total, 1);
+  assert.equal(authorized.json().workers.running, 1);
+  assert.equal(authorized.json().workers.withErrors, 1);
+  assert.ok(Array.isArray(authorized.json().recentWorkers));
+  assert.equal(authorized.json().recentWorkers.length, 1);
+  assert.equal(authorized.json().recentWorkers[0].workerId, "status-worker");
   assert.ok(Array.isArray(authorized.json().recentVerdicts));
   assert.ok(authorized.json().recentVerdicts.length >= 1);
   assert.ok(Array.isArray(authorized.json().recentAudit));
@@ -1423,6 +1459,8 @@ test("admin dashboard endpoint returns attention queues for operators", async (t
   assert.equal(typeof authorized.json().generatedAt, "string");
   assert.equal(typeof authorized.json().tasks.total, "number");
   assert.equal(typeof authorized.json().nodes.total, "number");
+  assert.equal(typeof authorized.json().workers.total, "number");
+  assert.ok(Array.isArray(authorized.json().recentWorkers));
   assert.ok(Array.isArray(authorized.json().attentionTasks));
   assert.ok(Array.isArray(authorized.json().attentionNodes));
   assert.ok(authorized.json().attentionTasks.some((item: { reason: string; snapshot: { task: { id: string } } }) => item.reason === "failed" && item.snapshot.task.id === failedTask.id));
@@ -1456,6 +1494,9 @@ test("admin dashboard ui endpoint serves html shell", async (t) => {
   assert.match(response.body, /\/admin\/dashboard/);
   assert.match(response.body, /id="language"/);
   assert.match(response.body, /id="gpuNodes"/);
+  assert.match(response.body, /id="workerSummary"/);
+  assert.match(response.body, /id="recentWorkers"/);
+  assert.match(response.body, /id="workerErrorsOnly"/);
   assert.match(response.body, /id="gpuActiveOnly"/);
   assert.match(response.body, /id="gpuMinVram"/);
   assert.match(response.body, />EN<\/option>/);

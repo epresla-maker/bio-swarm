@@ -189,6 +189,8 @@ export interface AdminDashboardSnapshot {
   generatedAt: string;
   tasks: TaskStatusSummary;
   nodes: NodeStatusSummary;
+  workers: WorkerStatusSummary;
+  recentWorkers: WorkerSnapshot[];
   attentionTasks: AdminDashboardTaskItem[];
   attentionNodes: AdminDashboardNodeItem[];
   recentVerdicts: TaskVerdictLogEntry[];
@@ -232,6 +234,14 @@ export interface WorkerSnapshot {
   lastResultAt: string | null;
   registeredAt: string;
   lastSeenAt: string;
+}
+
+export interface WorkerStatusSummary {
+  total: number;
+  active: number;
+  running: number;
+  idle: number;
+  withErrors: number;
 }
 
 const tasks = new Map<string, TaskRecord>();
@@ -476,6 +486,8 @@ export function getAdminDashboardSnapshot(): AdminDashboardSnapshot {
     generatedAt: new Date(nowProvider()).toISOString(),
     tasks: getTaskStatusSummary(),
     nodes: getNodeStatusSummary(),
+    workers: getWorkerStatusSummary(),
+    recentWorkers: listWorkers(5),
     attentionTasks,
     attentionNodes,
     recentVerdicts: getRecentVerdicts({ limit: 5 }),
@@ -1265,6 +1277,40 @@ export function listWorkers(limit: number): WorkerSnapshot[] {
 export function getWorker(workerId: string): WorkerSnapshot | null {
   const found = workers.get(workerId);
   return found ? toWorkerSnapshot(found) : null;
+}
+
+export function getWorkerStatusSummary(): WorkerStatusSummary {
+  const now = nowProvider();
+  let active = 0;
+  let running = 0;
+  let idle = 0;
+  let withErrors = 0;
+
+  for (const worker of workers.values()) {
+    if (now - new Date(worker.lastSeenAt).getTime() <= 120_000) {
+      active += 1;
+    }
+
+    if (worker.status === "running") {
+      running += 1;
+    }
+
+    if (worker.status === "idle") {
+      idle += 1;
+    }
+
+    if (worker.lastExecutionStatus === "completed_with_error" || worker.lastExecutionStatus === "submit_failed") {
+      withErrors += 1;
+    }
+  }
+
+  return {
+    total: workers.size,
+    active,
+    running,
+    idle,
+    withErrors
+  };
 }
 
 function toWorkerSnapshot(item: WorkerRecord): WorkerSnapshot {

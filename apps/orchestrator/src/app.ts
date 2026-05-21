@@ -12,6 +12,7 @@ import {
   getAuditPersistenceStatus,
   getNodeSnapshot,
   getNodeStatusSummary,
+  getWorkerStatusSummary,
   getTaskVerdicts,
   getTaskStatusSummary,
   listTaskResults,
@@ -941,6 +942,8 @@ export function buildApp(options?: {
     return {
       tasks: getTaskStatusSummary(),
       nodes: getNodeStatusSummary(),
+      workers: getWorkerStatusSummary(),
+      recentWorkers: listWorkers(5),
       recentVerdicts: getRecentVerdicts({ limit: 5 }),
       recentAudit: getAuditLog({ limit: 5 }),
       auditPersistence: getAuditPersistenceStatus()
