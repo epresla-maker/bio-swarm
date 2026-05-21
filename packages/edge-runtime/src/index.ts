@@ -28,6 +28,7 @@ const config = {
   nodeId: process.env.NODE_ID ?? `node-${crypto.randomUUID().slice(0, 8)}`,
   capabilities: resolveCapabilities(),
   adminApiKey: process.env.EDGE_ADMIN_API_KEY,
+  packageSigningKey: process.env.EDGE_PACKAGE_SIGNING_KEY,
   agentVersion: process.env.EDGE_AGENT_VERSION ?? "edge-runtime/0.1.0",
   platform: `${os.platform()}-${os.arch()}`,
   idleSleepMs: 5000,

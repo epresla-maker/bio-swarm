@@ -6,6 +6,7 @@ export interface EdgeRuntimeConfig {
   nodeId: string;
   capabilities: NodeCapabilities;
   adminApiKey?: string;
+  packageSigningKey?: string;
   agentVersion?: string;
   platform?: string;
   idleSleepMs: number;
@@ -54,6 +55,8 @@ interface ResolvedWorkerPackage {
   name: string | null;
   version: string | null;
   checksum: string;
+  signature: string | null;
+  signatureAlgorithm: string | null;
   runtime: string;
   entrypoint: string;
   content: string;
@@ -370,6 +373,7 @@ async function executePackageTask(
   const packageNameInput = typeof payload.packageName === "string" ? payload.packageName.trim() : "";
   const packageVersionInput = typeof payload.packageVersion === "string" ? payload.packageVersion.trim() : "";
   const expectedChecksum = typeof payload.checksum === "string" ? payload.checksum : null;
+  const expectedSignature = typeof payload.signature === "string" ? payload.signature : null;
 
   if (!config) {
     return {
@@ -381,6 +385,7 @@ async function executePackageTask(
   let packageId = packageIdInput;
   let resolvedVersion: string | null = null;
   let checksumToVerify = expectedChecksum;
+  let signatureToVerify = expectedSignature;
 
   if (!packageId) {
     if (!packageNameInput) {
@@ -409,6 +414,10 @@ async function executePackageTask(
     if (!checksumToVerify) {
       checksumToVerify = resolved.checksum;
     }
+
+    if (!signatureToVerify) {
+      signatureToVerify = resolved.signature;
+    }
   }
 
   const pkg = await loadWorkerPackage(config, deps, packageId, checksumToVerify ?? undefined);
@@ -429,6 +438,38 @@ async function executePackageTask(
       expectedChecksum: checksumToVerify,
       downloadedChecksum
     };
+  }
+
+  const downloadedSignature = typeof pkg.signature === "string" && pkg.signature.length > 0 ? pkg.signature : null;
+  if (signatureToVerify && signatureToVerify !== downloadedSignature) {
+    return {
+      score: 0,
+      packageId,
+      error: "signature_mismatch",
+      expectedSignature: signatureToVerify,
+      downloadedSignature
+    };
+  }
+
+  if (config.packageSigningKey) {
+    if (!downloadedSignature) {
+      return {
+        score: 0,
+        packageId,
+        error: "signature_missing"
+      };
+    }
+
+    const calculatedSignature = calculatePackageSignature(pkg, config.packageSigningKey);
+    if (calculatedSignature !== downloadedSignature) {
+      return {
+        score: 0,
+        packageId,
+        error: "signature_invalid",
+        expectedSignature: calculatedSignature,
+        downloadedSignature
+      };
+    }
   }
 
   const sandboxViolation = getPackageSandboxViolation(pkg);
@@ -453,6 +494,8 @@ async function executePackageTask(
     packageId,
     packageVersion: resolvedVersion ?? pkg.version,
     checksumVerified: true,
+    signatureVerified:
+      downloadedSignature !== null && (!signatureToVerify || signatureToVerify === downloadedSignature),
     runtime: pkg.runtime,
     entrypoint: pkg.entrypoint,
     output: {
@@ -517,6 +560,8 @@ async function resolveWorkerPackage(
     name: typeof parsed.name === "string" ? parsed.name : null,
     version: typeof parsed.version === "string" ? parsed.version : null,
     checksum: parsed.checksum,
+    signature: typeof parsed.signature === "string" ? parsed.signature : null,
+    signatureAlgorithm: typeof parsed.signatureAlgorithm === "string" ? parsed.signatureAlgorithm : null,
     runtime: parsed.runtime,
     entrypoint: parsed.entrypoint,
     content: parsed.content
@@ -580,10 +625,24 @@ async function fetchWorkerPackage(
     name: typeof parsed.name === "string" ? parsed.name : null,
     version: typeof parsed.version === "string" ? parsed.version : null,
     checksum: parsed.checksum,
+    signature: typeof parsed.signature === "string" ? parsed.signature : null,
+    signatureAlgorithm: typeof parsed.signatureAlgorithm === "string" ? parsed.signatureAlgorithm : null,
     runtime: parsed.runtime,
     entrypoint: parsed.entrypoint,
     content: parsed.content
   };
+}
+
+function calculatePackageSignature(pkg: ResolvedWorkerPackage, key: string): string {
+  const payload = JSON.stringify({
+    name: pkg.name ?? "",
+    version: pkg.version ?? "",
+    runtime: pkg.runtime,
+    entrypoint: pkg.entrypoint,
+    checksum: pkg.checksum
+  });
+
+  return crypto.createHmac("sha256", key).update(payload).digest("hex");
 }
 
 function buildAdminHeaders(config: EdgeRuntimeConfig): Record<string, string> {

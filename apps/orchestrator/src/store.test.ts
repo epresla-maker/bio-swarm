@@ -337,6 +337,32 @@ test("worker package registry stores and updates by name/version", () => {
   assert.equal(listWorkerPackages(10).length, 1);
 });
 
+test("worker package registry includes signature when PACKAGE_SIGNING_KEY is set", () => {
+  resetStoreForTests();
+  const previousKey = process.env.PACKAGE_SIGNING_KEY;
+  process.env.PACKAGE_SIGNING_KEY = "test-signing-key";
+
+  try {
+    const created = registerWorkerPackage({
+      name: "signed-kernel",
+      version: "1.0.0",
+      runtime: "node",
+      entrypoint: "index.js",
+      content: "export const signed = true;"
+    });
+
+    assert.equal(created.signatureAlgorithm, "hmac-sha256");
+    assert.equal(typeof created.signature, "string");
+    assert.ok((created.signature ?? "").length > 10);
+  } finally {
+    if (typeof previousKey === "string") {
+      process.env.PACKAGE_SIGNING_KEY = previousKey;
+    } else {
+      delete process.env.PACKAGE_SIGNING_KEY;
+    }
+  }
+});
+
 test("worker package registry resolves by name and optional version", () => {
   resetStoreForTests();
 
@@ -412,4 +438,34 @@ test("worker registry tracks registration and heartbeat updates", () => {
 
   const missingHeartbeat = heartbeatWorker("worker-missing", { status: "idle" });
   assert.equal(missingHeartbeat, null);
+});
+
+test("listWorkers supports errorsOnly filtering", () => {
+  resetStoreForTests();
+
+  registerWorker({
+    workerId: "worker-ok",
+    nodeId: "node-ok",
+    agentVersion: "worker/0.1.0",
+    platform: "darwin-arm64",
+    status: "running",
+    lastExecutionStatus: "completed"
+  });
+
+  registerWorker({
+    workerId: "worker-err",
+    nodeId: "node-err",
+    agentVersion: "worker/0.1.0",
+    platform: "darwin-arm64",
+    status: "running",
+    lastExecutionStatus: "completed_with_error",
+    lastExecutionError: "checksum_mismatch"
+  });
+
+  const allWorkers = listWorkers({ limit: 10 });
+  assert.equal(allWorkers.length, 2);
+
+  const errorWorkers = listWorkers({ limit: 10, errorsOnly: true });
+  assert.equal(errorWorkers.length, 1);
+  assert.equal(errorWorkers[0].workerId, "worker-err");
 });

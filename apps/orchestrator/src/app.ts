@@ -382,7 +382,7 @@ export function buildApp(options?: {
     return reply.status(200).send(worker);
   });
 
-  app.get<{ Querystring: { limit?: string } }>("/workers", async (request, reply) => {
+  app.get<{ Querystring: { limit?: string; errorsOnly?: string } }>("/workers", async (request, reply) => {
     if (!enforceAdminAccess(request, reply)) {
       return;
     }
@@ -392,7 +392,18 @@ export function buildApp(options?: {
       return reply.status(400).send({ error: "invalid_limit" });
     }
 
-    return reply.status(200).send({ items: listWorkers(parsedLimit) });
+    let errorsOnly: boolean | undefined;
+    if (typeof request.query.errorsOnly === "string") {
+      if (request.query.errorsOnly === "true") {
+        errorsOnly = true;
+      } else if (request.query.errorsOnly === "false") {
+        errorsOnly = false;
+      } else {
+        return reply.status(400).send({ error: "invalid_errors_only_filter" });
+      }
+    }
+
+    return reply.status(200).send({ items: listWorkers({ limit: parsedLimit, errorsOnly }) });
   });
 
   app.get<{ Params: { id: string } }>("/workers/:id", async (request, reply) => {

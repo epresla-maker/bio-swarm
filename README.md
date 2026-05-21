@@ -39,8 +39,9 @@ Phones execute only lightweight work units such as:
 
 Desktop GPU nodes handle heavier task-level inference units such as `llm_inference`.
 Workers can also run centrally managed package tasks via `package_execute`.
-`package_execute` accepts either `packageId` or `packageName` (+ optional `packageVersion`) and workers cache downloaded packages in-memory by `packageId`.
+`package_execute` accepts either `packageId` or `packageName` (+ optional `packageVersion`) and workers cache downloaded packages in-memory by `packageId`. Optional package `signature` can be passed in task payload.
 For safety, package execution is blocked when runtime is unsupported or when package content contains dangerous Node API usage patterns (for example `child_process`, `fs`, `net`, `dns`, `process.env`).
+When package signing is enabled, workers verify package signatures (`hmac-sha256`) before execution.
 
 Execution is allowed when policy permits:
 
@@ -162,17 +163,16 @@ The orchestrator performs:
 - `POST /nodes/:id/enable` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /telemetry`
 - `GET /admin/verdicts?limit=20&accepted=true&taskId=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
-- `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, includes task/node summaries plus recent verdict and audit samples)
 - `GET /admin/status` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns task/node/worker summaries, recent worker snapshots, recent verdicts, recent audit items, and audit persistence status)
 - `GET /admin/dashboard` (requires header `x-admin-key: <ADMIN_API_KEY>`, highlights attention tasks and nodes for operators with reason-specific metrics)
 - `GET /admin/dashboard/ui` (browser UI shell for operators; enter admin key in page to fetch `/admin/dashboard`)
-- `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum)
+- `POST /packages` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers or updates a worker package by name+version with checksum and optional signature)
 - `GET /packages?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists registered worker packages)
-- `GET /packages/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns package metadata + content)
-- `GET /packages/resolve?name=...&version=...` (requires header `x-admin-key: <ADMIN_API_KEY>`, resolves package by name with optional exact version; without version returns latest)
+- `GET /packages/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns package metadata + content + optional signature fields)
+- `GET /packages/resolve?name=...&version=...` (requires header `x-admin-key: <ADMIN_API_KEY>`, resolves package by name with optional exact version; without version returns latest, includes optional signature fields)
 - `POST /workers/register` (requires header `x-admin-key: <ADMIN_API_KEY>`, registers worker agent metadata)
 - `POST /workers/:id/heartbeat` (requires header `x-admin-key: <ADMIN_API_KEY>`, updates worker runtime status and last execution telemetry such as `lastTaskId`, `lastTaskKind`, `lastExecutionStatus`, `lastExecutionError`)
-- `GET /workers?limit=50` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists worker agents)
+- `GET /workers?limit=50&errorsOnly=true|false` (requires header `x-admin-key: <ADMIN_API_KEY>`, lists worker agents with optional error-state filtering)
 - `GET /workers/:id` (requires header `x-admin-key: <ADMIN_API_KEY>`, returns worker snapshot)
 - `GET /admin/audit?limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
 - `GET /admin/audit/export?format=jsonl|csv&limit=50&nodeId=...&taskId=...&eventType=...&since=...&until=...` (requires header `x-admin-key: <ADMIN_API_KEY>`)
@@ -194,11 +194,13 @@ Orchestrator:
 - `AUDIT_LOG_MAX_BYTES` (default `5000000`)
 - `AUDIT_LOG_MAX_FILES` (default `5`)
 - `AUDIT_LOG_RETENTION_DAYS` (default `30`, rotated files older than this are removed)
+- `PACKAGE_SIGNING_KEY` (optional, enables `hmac-sha256` package signatures in package registry responses)
 
 Edge runtime:
 - `ORCHESTRATOR_URL` (default `http://localhost:4000`)
 - `NODE_ID` (default random `node-xxxxxxxx`)
 - `EDGE_ADMIN_API_KEY` (optional, used by worker to download registered packages from `/packages/:id`)
+- `EDGE_PACKAGE_SIGNING_KEY` (optional, when set worker enforces package signature verification before execution)
 - `EDGE_AGENT_VERSION` (optional, worker version string sent during `/workers/register`)
 - `EDGE_PROFILE` (`mobile` default, `desktop-gpu` enables desktop GPU capability mode)
 - `EDGE_GPU_VENDOR` (used when `EDGE_PROFILE=desktop-gpu`)

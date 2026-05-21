@@ -21,6 +21,8 @@ interface WorkerPackageRecord {
   entrypoint: string;
   content: string;
   checksum: string;
+  signature: string | null;
+  signatureAlgorithm: "hmac-sha256" | null;
   createdAt: string;
 }
 
@@ -31,6 +33,8 @@ export interface WorkerPackageView {
   runtime: string;
   entrypoint: string;
   checksum: string;
+  signature: string | null;
+  signatureAlgorithm: "hmac-sha256" | null;
   sizeBytes: number;
   createdAt: string;
 }
@@ -242,6 +246,11 @@ export interface WorkerStatusSummary {
   running: number;
   idle: number;
   withErrors: number;
+}
+
+export interface WorkerListQuery {
+  limit: number;
+  errorsOnly?: boolean;
 }
 
 const tasks = new Map<string, TaskRecord>();
@@ -533,6 +542,13 @@ export function registerWorkerPackage(input: {
 }): WorkerPackageView {
   const createdAt = new Date(nowProvider()).toISOString();
   const checksum = crypto.createHash("sha256").update(input.content).digest("hex");
+  const signature = signWorkerPackage({
+    name: input.name,
+    version: input.version,
+    runtime: input.runtime,
+    entrypoint: input.entrypoint,
+    checksum
+  });
 
   const existing = Array.from(workerPackages.values()).find(
     (item) => item.name === input.name && item.version === input.version
@@ -543,6 +559,8 @@ export function registerWorkerPackage(input: {
     existing.entrypoint = input.entrypoint;
     existing.content = input.content;
     existing.checksum = checksum;
+    existing.signature = signature;
+    existing.signatureAlgorithm = signature ? "hmac-sha256" : null;
     existing.createdAt = createdAt;
     return toWorkerPackageView(existing);
   }
@@ -556,6 +574,8 @@ export function registerWorkerPackage(input: {
     entrypoint: input.entrypoint,
     content: input.content,
     checksum,
+    signature,
+    signatureAlgorithm: signature ? "hmac-sha256" : null,
     createdAt
   };
 
@@ -654,9 +674,34 @@ function toWorkerPackageView(item: WorkerPackageRecord): WorkerPackageView {
     runtime: item.runtime,
     entrypoint: item.entrypoint,
     checksum: item.checksum,
+    signature: item.signature,
+    signatureAlgorithm: item.signatureAlgorithm,
     sizeBytes: Buffer.byteLength(item.content, "utf8"),
     createdAt: item.createdAt
   };
+}
+
+function signWorkerPackage(input: {
+  name: string;
+  version: string;
+  runtime: string;
+  entrypoint: string;
+  checksum: string;
+}): string | null {
+  const signingKey = process.env.PACKAGE_SIGNING_KEY?.trim() ?? "";
+  if (!signingKey) {
+    return null;
+  }
+
+  const payload = JSON.stringify({
+    name: input.name,
+    version: input.version,
+    runtime: input.runtime,
+    entrypoint: input.entrypoint,
+    checksum: input.checksum
+  });
+
+  return crypto.createHmac("sha256", signingKey).update(payload).digest("hex");
 }
 
 export function claimTask(nodeId: string): SwarmTask | null {
@@ -1266,12 +1311,23 @@ export function heartbeatWorker(
   return toWorkerSnapshot(existing);
 }
 
-export function listWorkers(limit: number): WorkerSnapshot[] {
-  const bounded = Math.max(1, Math.min(200, Math.floor(limit)));
-  return Array.from(workers.values())
+export function listWorkers(query: number | WorkerListQuery): WorkerSnapshot[] {
+  const input = typeof query === "number" ? { limit: query } : query;
+  const bounded = Math.max(1, Math.min(200, Math.floor(input.limit)));
+  const errorsOnly = Boolean(input.errorsOnly);
+
+  const items = Array.from(workers.values())
+    .filter((worker) => {
+      if (!errorsOnly) {
+        return true;
+      }
+
+      return isWorkerInErrorState(worker);
+    })
     .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
-    .slice(0, bounded)
-    .map((item) => toWorkerSnapshot(item));
+    .slice(0, bounded);
+
+  return items.map((item) => toWorkerSnapshot(item));
 }
 
 export function getWorker(workerId: string): WorkerSnapshot | null {
@@ -1332,6 +1388,10 @@ function toWorkerSnapshot(item: WorkerRecord): WorkerSnapshot {
     registeredAt: item.registeredAt,
     lastSeenAt: item.lastSeenAt
   };
+}
+
+function isWorkerInErrorState(worker: WorkerRecord): boolean {
+  return worker.lastExecutionStatus === "completed_with_error" || worker.lastExecutionStatus === "submit_failed";
 }
 
 export function listTaskSnapshots(query: TaskListQuery): TaskSnapshot[] {

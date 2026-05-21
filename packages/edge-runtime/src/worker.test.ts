@@ -44,6 +44,25 @@ function createDeps(fetchFn: typeof fetch): EdgeRuntimeDeps {
   };
 }
 
+function signPackage(input: {
+  name?: string;
+  version?: string;
+  runtime: string;
+  entrypoint: string;
+  checksum: string;
+  key: string;
+}): string {
+  const payload = JSON.stringify({
+    name: input.name ?? "",
+    version: input.version ?? "",
+    runtime: input.runtime,
+    entrypoint: input.entrypoint,
+    checksum: input.checksum
+  });
+
+  return crypto.createHmac("sha256", input.key).update(payload).digest("hex");
+}
+
 test("processTask returns deterministic structure", async () => {
   const task: SwarmTask = {
     id: "t-1",
@@ -242,6 +261,118 @@ test("processTask resolves package_execute by package name and version", async (
   assert.equal(result.payload.packageId, "pkg-resolved-1");
   assert.equal(result.payload.packageVersion, "1.1.0");
   assert.equal(result.payload.checksumVerified, true);
+});
+
+test("processTask verifies package signature with packageSigningKey", async () => {
+  resetPackageCacheForTests();
+  const packageContent = "export function run(input){ return input; }";
+  const checksum = crypto.createHash("sha256").update(packageContent).digest("hex");
+  const signingKey = "edge-signing-key";
+  const signature = signPackage({
+    name: "signed-kernel",
+    version: "1.0.0",
+    runtime: "node",
+    entrypoint: "index.js",
+    checksum,
+    key: signingKey
+  });
+
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/packages/pkg-signed-1")) {
+      return new Response(
+        JSON.stringify({
+          packageId: "pkg-signed-1",
+          name: "signed-kernel",
+          version: "1.0.0",
+          runtime: "node",
+          entrypoint: "index.js",
+          checksum,
+          signature,
+          signatureAlgorithm: "hmac-sha256",
+          content: packageContent
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    return new Response("", { status: 404 });
+  });
+
+  const result = await processTask(
+    {
+      id: "t-pkg-signed-1",
+      kind: "package_execute",
+      payload: {
+        packageId: "pkg-signed-1",
+        checksum,
+        signature,
+        input: { n: 1 }
+      },
+      createdAt: new Date().toISOString(),
+      quorum: 1
+    },
+    "node-pkg-signed-1",
+    {
+      ...createConfig(),
+      adminApiKey: "edge-package-key",
+      packageSigningKey: signingKey
+    },
+    deps
+  );
+
+  assert.equal(result.score > 0, true);
+  assert.equal(result.payload.signatureVerified, true);
+});
+
+test("processTask rejects package when signature is invalid for packageSigningKey", async () => {
+  resetPackageCacheForTests();
+  const packageContent = "export function run(input){ return input; }";
+  const checksum = crypto.createHash("sha256").update(packageContent).digest("hex");
+
+  const deps = createDeps(async (url) => {
+    if (String(url).includes("/packages/pkg-badsig-1")) {
+      return new Response(
+        JSON.stringify({
+          packageId: "pkg-badsig-1",
+          name: "signed-kernel",
+          version: "1.0.0",
+          runtime: "node",
+          entrypoint: "index.js",
+          checksum,
+          signature: "deadbeef",
+          signatureAlgorithm: "hmac-sha256",
+          content: packageContent
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    return new Response("", { status: 404 });
+  });
+
+  const result = await processTask(
+    {
+      id: "t-pkg-badsig-1",
+      kind: "package_execute",
+      payload: {
+        packageId: "pkg-badsig-1",
+        checksum,
+        input: { n: 1 }
+      },
+      createdAt: new Date().toISOString(),
+      quorum: 1
+    },
+    "node-pkg-badsig-1",
+    {
+      ...createConfig(),
+      adminApiKey: "edge-package-key",
+      packageSigningKey: "edge-signing-key"
+    },
+    deps
+  );
+
+  assert.equal(result.score, 0);
+  assert.equal(result.payload.error, "signature_invalid");
 });
 
 test("processTask blocks package_execute when sandbox policy detects dangerous APIs", async () => {

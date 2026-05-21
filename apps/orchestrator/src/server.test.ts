@@ -1643,14 +1643,57 @@ test("worker registry API registers, heartbeats, lists and fetches workers", asy
   assert.equal(heartbeat.json().lastExecutionStatus, "completed");
   assert.equal(heartbeat.json().lastExecutionError, null);
 
+  const secondRegistered = await app.inject({
+    method: "POST",
+    url: "/workers/register",
+    headers: { "x-admin-key": "worker-key" },
+    payload: {
+      workerId: "worker-2",
+      nodeId: "node-2",
+      agentVersion: "worker/0.1.0",
+      platform: "darwin-arm64",
+      status: "running"
+    }
+  });
+  assert.equal(secondRegistered.statusCode, 201);
+
+  const secondHeartbeat = await app.inject({
+    method: "POST",
+    url: "/workers/worker-2/heartbeat",
+    headers: { "x-admin-key": "worker-key" },
+    payload: {
+      status: "running",
+      lastExecutionStatus: "completed_with_error",
+      lastExecutionError: "checksum_mismatch"
+    }
+  });
+  assert.equal(secondHeartbeat.statusCode, 200);
+
   const listed = await app.inject({
     method: "GET",
     url: "/workers?limit=10",
     headers: { "x-admin-key": "worker-key" }
   });
   assert.equal(listed.statusCode, 200);
-  assert.equal(listed.json().items.length, 1);
-  assert.equal(listed.json().items[0].workerId, "worker-1");
+  assert.equal(listed.json().items.length, 2);
+  const listedIds = listed.json().items.map((item: { workerId: string }) => item.workerId).sort();
+  assert.deepEqual(listedIds, ["worker-1", "worker-2"]);
+
+  const listedErrorsOnly = await app.inject({
+    method: "GET",
+    url: "/workers?limit=10&errorsOnly=true",
+    headers: { "x-admin-key": "worker-key" }
+  });
+  assert.equal(listedErrorsOnly.statusCode, 200);
+  assert.equal(listedErrorsOnly.json().items.length, 1);
+  assert.equal(listedErrorsOnly.json().items[0].workerId, "worker-2");
+
+  const listedInvalidFilter = await app.inject({
+    method: "GET",
+    url: "/workers?limit=10&errorsOnly=maybe",
+    headers: { "x-admin-key": "worker-key" }
+  });
+  assert.equal(listedInvalidFilter.statusCode, 400);
 
   const fetched = await app.inject({
     method: "GET",
